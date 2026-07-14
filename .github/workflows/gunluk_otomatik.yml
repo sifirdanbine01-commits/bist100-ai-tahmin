@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install pandas numpy pandas-ta lightgbm scikit-learn yfinance requests joblib
+      - run: pip install "numpy<2.0" pandas pandas-ta lightgbm scikit-learn yfinance requests joblib
       - name: Otomatik guncelleme dene (guard kontrolluu)
         env:
           HEDEF_TARIH: ''  # BOS BIRAKILIYOR - otomatik mod devreye girer
