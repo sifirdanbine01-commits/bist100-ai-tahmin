@@ -34,6 +34,7 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-          git add durum.json guncel_veri.csv sorgu_gecmisi.csv model_siniflandirma.pkl model_regresyon.pkl
+        git add durum.json guncel_veri.csv model_siniflandirma.pkl model_regresyon.pkl
+          git add sorgu_gecmisi.csv 2>/dev/null || true
           git commit -m "Model guncellendi - $(date +%Y-%m-%d)" || echo "Degisiklik yok"
           git push
