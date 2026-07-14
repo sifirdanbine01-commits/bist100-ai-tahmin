@@ -1,0 +1,39 @@
+name: Egit veya Ilerlet
+
+# Telefondan: Repo -> Actions -> "Egit veya Ilerlet" -> Run workflow
+# hedef_tarih kutusuna istediğin tarihi yaz (örn: 2024-12-31 veya 2025-01-31)
+
+on:
+  workflow_dispatch:
+    inputs:
+      hedef_tarih:
+        description: 'Hedef tarih (YYYY-MM-DD)'
+        required: true
+        default: '2024-12-31'
+
+permissions:
+  contents: write
+
+jobs:
+  egit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy pandas-ta lightgbm scikit-learn yfinance requests joblib
+      - name: Modeli guncelle
+        env:
+          HEDEF_TARIH: ${{ github.event.inputs.hedef_tarih }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python guncelle.py
+      - name: Sonuclari repoya kaydet
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add durum.json guncel_veri.csv sorgu_gecmisi.csv model_siniflandirma.pkl model_regresyon.pkl
+          git commit -m "Model guncellendi - $(date +%Y-%m-%d)" || echo "Degisiklik yok"
+          git push
