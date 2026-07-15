@@ -1,17 +1,9 @@
 name: Gunluk Otomatik Kontrol
 
-# Her gun otomatik calisir AMA guncelle.py icindeki guard mekanizmasi
-# sayesinde, sen henuz manuel ilerletme surecindeysen HICBIR SEY YAPMAZ.
-# Sadece senin durumun (durum.json) BUGUNE YAKINSA gercekten calisir.
-#
-# Yani bu workflow'u simdiden aktif birakman GUVENLIDIR - senin
-# manuel /egit, /ilerlet surecine karismaz, sessizce bekler.
-
 on:
   schedule:
-    - cron: '30 18 * * 1-5'  # hafta ici her gun, TR saatiyle ~21:30 
-                                # (UTC 18:30 = TR 21:30 yaz saati)
-  workflow_dispatch: {}  # istersen elle de tetikleyebilirsin, test icin
+    - cron: '30 18 * * 1-5'
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -22,21 +14,25 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - run: pip install pandas numpy pandas-ta-classic lightgbm scikit-learn yfinance requests joblib
-      - name: Otomatik guncelleme dene (guard kontrolluu)
+
+      - name: Otomatik guncelleme dene
         env:
-          HEDEF_TARIH: ''  # BOS BIRAKILIYOR - otomatik mod devreye girer
+          HEDEF_TARIH: ''
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python guncelle.py
-      - name: Sonuclari kaydet (eger guncelleme yapildiysa)
+
+      - name: Sonuclari kaydet
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add durum.json guncel_veri.csv model_siniflandirma.pkl model_regresyon.pkl
           git add sorgu_gecmisi.csv 2>/dev/null || true
-          git commit -m "Otomatik gunluk guncelleme - $(date +%Y-%m-%d)" || echo "Degisiklik yok (muhtemelen guard bekletti)"
+          git commit -m "Otomatik gunluk guncelleme" || echo "Degisiklik yok"
           git push || echo "Push edilecek bir sey yok"
