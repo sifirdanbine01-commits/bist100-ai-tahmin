@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - run: pip install pandas numpy lightgbm joblib requests
+      - run: pip install pandas numpy lightgbm scikit-learn joblib requests
 
       - name: Sorguyu calistir
         env:
