@@ -1,49 +1,53 @@
 """
-/sorgu KOMUTU (Birleşik Model Versiyonu)
-==========================================
-Kayıtlı modeli (guncelle.py tarafından eğitilmiş) okur, istenen
-hissenin GÜNCEL DURUMUNU (son eğitim tarihi itibariyle) alır,
-tahmin üretir. Sonucu sorgu_gecmisi.csv'ye loglar (ileride
-sonuc_ac.py bunun gerçek sonucunu değerlendirecek).
+/sorgu KOMUTU — TEMİZ VERSİYON
+================================
+Kayıtlı modeli okur, istenen hissenin GÜNCEL DURUMUNU (guncel_veri.csv
+içinden, son eğitim tarihi itibariyle) alır, tahmin üretir.
+
+ÖNEMLİ: Bu dosya market_structure.py veya gostergeler.py'yi
+İMPORT ETMEZ — çünkü guncel_veri.csv zaten hesaplanmış tüm
+göstergeleri içeriyor (RSI, ATR, BOS bilgisi vb.). Bu yüzden
+pandas-ta-classic gibi ağır kütüphanelere ihtiyaç duymaz,
+sadece pandas + lightgbm + joblib yeterlidir.
 """
 
 import os
 import pandas as pd
-from datetime import datetime
+import joblib
 
-from model_egit import modelleri_yukle
-from gunluk_ozellik_seti import OZELLIK_KOLONLARI
-from durum import durumu_oku
 from telegram_bildirim import telegram_mesaj_gonder
-from market_structure import market_structure_tespit_et
-from gostergeler import gostergeleri_ekle
+from durum import durumu_oku
 
 SORGU_GECMISI_DOSYASI = 'sorgu_gecmisi.csv'
 
+OZELLIK_KOLONLARI = [
+    'rsi_14', 'macd_hist', 'adx', 'hacim_orani', 'bb_genislik',
+    'stoch_k', 'fiyat_ma200_ustu', 'ema_kesisim_yukari',
+    'son_bos_gun_farki', 'son_bos_yonu', 'son_bos_gecerli',
+]
 
-def stop_seviyesi_hesapla(df_g, son_index, yon):
-    """Yapısal pivot ile ATR bazlı stop'un daha temkinli olanını seçer."""
-    atr = df_g['atr'].iloc[son_index]
-    giris = df_g['Close'].iloc[son_index]
 
+def modelleri_yukle():
+    siniflandirma_model = joblib.load('model_siniflandirma.pkl')
+    regresyon_model = joblib.load('model_regresyon.pkl')
+    return siniflandirma_model, regresyon_model
+
+
+def stop_seviyesi_hesapla(guncel_fiyat, atr, yon):
+    """ATR bazlı basit stop hesaplama - ekstra veri gerektirmez."""
     if yon == 1:
-        atr_stop = giris - 2 * atr
-        pivotlar = df_g.iloc[max(0, son_index - 40):son_index]
-        pivot_lowlar = pivotlar[pivotlar['pivot_low']]['Low']
-        yapisal_stop = pivot_lowlar.iloc[-1] if not pivot_lowlar.empty else atr_stop
-        return max(atr_stop, yapisal_stop)  # ikisinden giriş fiyatına yakın olan (temkinli)
+        return guncel_fiyat - 2 * atr
     else:
-        atr_stop = giris + 2 * atr
-        pivotlar = df_g.iloc[max(0, son_index - 40):son_index]
-        pivot_highlar = pivotlar[pivotlar['pivot_high']]['High']
-        yapisal_stop = pivot_highlar.iloc[-1] if not pivot_highlar.empty else atr_stop
-        return min(atr_stop, yapisal_stop)
+        return guncel_fiyat + 2 * atr
 
 
 def sorgula(sembol):
     durum = durumu_oku()
     if durum is None:
-        return "⚠️ Henüz hiç model eğitilmedi. Önce /egit komutunu çalıştır."
+        return "⚠️ Henüz hiç model eğitilmedi. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."
+
+    if not os.path.exists('guncel_veri.csv') or not os.path.exists('model_siniflandirma.pkl'):
+        return "⚠️ Model dosyaları bulunamadı. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."
 
     egitim_tarihi = pd.Timestamp(durum['egitim_tarihi'])
 
@@ -52,26 +56,28 @@ def sorgula(sembol):
 
     hisse_verisi = guncel_veri[guncel_veri['sembol'] == sembol.upper()].sort_values('tarih')
     if hisse_verisi.empty:
-        return f"⚠️ {sembol} için veri bulunamadı."
+        return (f"⚠️ {sembol} için veri bulunamadı. Sembolü kontrol et veya "
+                f"bu hisse şu anki hisse listesinde olmayabilir.")
 
     son_satir = hisse_verisi.iloc[-1]
 
     yapisal_gecerli = son_satir['son_bos_gecerli'] == 1
-    yon = int(son_satir['son_bos_yonu']) if yapisal_gecerli else 1  # yoksa varsayılan yön (regresyon karar verecek)
+    yon = int(son_satir['son_bos_yonu']) if yapisal_gecerli else 1
+
+    eksik_kolon = [k for k in OZELLIK_KOLONLARI if pd.isna(son_satir.get(k))]
+    if eksik_kolon:
+        return f"⚠️ {sembol} için eksik veri var: {eksik_kolon}"
 
     X = pd.DataFrame([son_satir[OZELLIK_KOLONLARI].to_dict()]).astype(float)
 
     siniflandirma_model, regresyon_model = modelleri_yukle()
-    basari_olasiligi = siniflandirma_model.predict_proba(X)[0][1]
-    beklenen_getiri_yuzde = regresyon_model.predict(X)[0]
+    basari_olasiligi = float(siniflandirma_model.predict_proba(X)[0][1])
+    beklenen_getiri_yuzde = float(regresyon_model.predict(X)[0])
 
-    guncel_fiyat = son_satir['Close']
-    if beklenen_getiri_yuzde >= 0:
-        hedef_fiyat = guncel_fiyat * (1 + beklenen_getiri_yuzde / 100)
-        gercek_yon = 1
-    else:
-        hedef_fiyat = guncel_fiyat * (1 + beklenen_getiri_yuzde / 100)
-        gercek_yon = -1
+    guncel_fiyat = float(son_satir['Close'])
+    hedef_fiyat = guncel_fiyat * (1 + beklenen_getiri_yuzde / 100)
+    atr = float(son_satir.get('atr', guncel_fiyat * 0.02))  # atr yoksa kaba tahmin
+    stop_fiyat = stop_seviyesi_hesapla(guncel_fiyat, atr, yon)
 
     mod_aciklamasi = (
         f"Yapısal Sinyal Modu — son BOS {int(son_satir['son_bos_gun_farki'])} gün önce "
@@ -87,13 +93,13 @@ def sorgula(sembol):
         f"Başarı Olasılığı: %{basari_olasiligi*100:.0f}\n"
         f"Beklenen Hareket: %{beklenen_getiri_yuzde:+.1f}\n\n"
         f"💰 Güncel: {guncel_fiyat:.2f} TL\n"
-        f"🎯 Hedef: {hedef_fiyat:.2f} TL\n\n"
+        f"🎯 Hedef: {hedef_fiyat:.2f} TL\n"
+        f"🛑 Stop: {stop_fiyat:.2f} TL\n\n"
         f"⚠️ Bu geçmişe dönük bir simülasyondur, yatırım tavsiyesi değildir."
     )
 
-    # Sorguyu logla (ileride sonuc_ac.py gerçek sonucu bulacak)
     yeni_kayit = pd.DataFrame([{
-        'tarih': egitim_tarihi, 'sembol': sembol.upper(), 'yon': gercek_yon,
+        'tarih': egitim_tarihi, 'sembol': sembol.upper(), 'yon': yon,
         'tahmin_basari_olasiligi': round(basari_olasiligi, 3),
         'beklenen_getiri_yuzde': round(beklenen_getiri_yuzde, 2),
         'mod': 'yapisal' if yapisal_gecerli else 'genel',
