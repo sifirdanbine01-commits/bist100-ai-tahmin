@@ -1,10 +1,9 @@
 """
 SONUÇ AÇIKLAMA MODÜLÜ
 =======================
-Daha önce /sorgu ile yapılan tahminlerin, artık gerçek sonucu
-bilindiğinde (yani o günden N gün sonrasına ait veri elimize
-geçtiğinde) doğru mu yanlış mı çıktığını hesaplar ve
-sorgu_gecmisi.csv dosyasını günceller.
+Daha önce /sorgu ile yapılan LONG tahminlerinin gerçek sonucunu
+hesaplar. "Risk uyarısı" olarak loglanan satırlar (mod=risk_uyarisi_asagi)
+bir trade önerisi olmadığı için DEĞERLENDİRİLMEZ, atlanır.
 """
 
 import pandas as pd
@@ -32,6 +31,11 @@ def onceki_sorgulari_degerlendir(tum_ozellik_df, yeni_hedef_tarih):
         if pd.notna(satir['gercek_sonuc']):
             continue  # zaten değerlendirilmiş
 
+        # Risk uyarısı satırları bir trade önerisi değil, değerlendirilmez
+        if satir.get('mod') == 'risk_uyarisi_asagi' or pd.isna(satir['tahmin_basari_olasiligi']):
+            gecmis.loc[idx, 'gercek_sonuc'] = -1  # -1: "değerlendirilmez" özel değeri
+            continue
+
         sorgu_tarihi = satir['tarih']
         sembol = satir['sembol']
 
@@ -51,11 +55,8 @@ def onceki_sorgulari_degerlendir(tum_ozellik_df, yeni_hedef_tarih):
             continue
         giris_fiyat = giris_satiri.iloc[0]['Close']
 
-        yon = satir['yon']
-        if yon == 1:
-            getiri = (hisse_verisi['Close'].max() - giris_fiyat) / giris_fiyat
-        else:
-            getiri = (giris_fiyat - hisse_verisi['Close'].min()) / giris_fiyat
+        # Bu sistem artık sadece LONG önerdiği için getiri hep yukarı yönlü ölçülür
+        getiri = (hisse_verisi['Close'].max() - giris_fiyat) / giris_fiyat
 
         basarili = int(getiri >= BASARI_ESIGI)
         gecmis.loc[idx, 'gercek_sonuc'] = basarili
