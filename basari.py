@@ -1,7 +1,9 @@
 """
 /basari KOMUTU
 ================
-sorgu_gecmisi.csv'yi okuyup genel ve mod bazlı başarı oranını gösterir.
+sorgu_gecmisi.csv'yi okuyup genel başarı oranını gösterir.
+Risk uyarısı satırları (mod=risk_uyarisi_asagi, gercek_sonuc=-1)
+başarı istatistiklerine DAHİL EDİLMEZ - onlar bir trade önerisi değildi.
 """
 
 import pandas as pd
@@ -17,12 +19,20 @@ def basari_raporu_olustur():
         return "⚠️ Henüz hiç sorgu yapılmadı."
 
     df = pd.read_csv(SORGU_GECMISI_DOSYASI)
-    degerlendirilen = df[df['gercek_sonuc'].notna()].copy()
+
+    risk_uyarisi_sayisi = len(df[df.get('mod') == 'risk_uyarisi_asagi'])
+    trade_onerileri = df[df.get('mod') != 'risk_uyarisi_asagi'].copy()
+
+    degerlendirilen = trade_onerileri[
+        trade_onerileri['gercek_sonuc'].notna() & (trade_onerileri['gercek_sonuc'] != -1)
+    ].copy()
 
     if degerlendirilen.empty:
-        return (f"📊 Toplam {len(df)} sorgu yapıldı ama henüz hiçbiri "
-                f"sonuçlanmadı (yeterli gün geçmemiş). /ilerlet ile "
-                f"zamanı ilerlettikçe sonuçlar açığa çıkacak.")
+        mesaj = (f"📊 Toplam {len(trade_onerileri)} LONG önerisi yapıldı ama henüz "
+                  f"hiçbiri sonuçlanmadı (yeterli gün geçmemiş).")
+        if risk_uyarisi_sayisi:
+            mesaj += f"\n\nAyrıca {risk_uyarisi_sayisi} kez 'long riskli' uyarısı verildi (bunlar sayılmaz)."
+        return mesaj
 
     degerlendirilen['dogru_mu'] = (
         ((degerlendirilen['tahmin_basari_olasiligi'] >= 0.5) & (degerlendirilen['gercek_sonuc'] == 1)) |
@@ -32,8 +42,8 @@ def basari_raporu_olustur():
     genel_dogruluk = degerlendirilen['dogru_mu'].mean() * 100
 
     mesaj = (
-        f"📊 <b>Başarı Takibi</b>\n\n"
-        f"Toplam sonuçlanan sorgu: {len(degerlendirilen)}\n"
+        f"📊 <b>Başarı Takibi (Sadece LONG Öneriler)</b>\n\n"
+        f"Toplam sonuçlanan öneri: {len(degerlendirilen)}\n"
         f"Genel doğruluk: %{genel_dogruluk:.1f}\n\n"
     )
 
@@ -42,16 +52,18 @@ def basari_raporu_olustur():
         if len(alt) > 0:
             oran = alt['dogru_mu'].mean() * 100
             mod_adi = "Yapısal Sinyal Modu" if mod == 'yapisal' else "Genel Hareket Modu"
-            mesaj += f"{mod_adi}: %{oran:.1f} ({len(alt)} sorgu)\n"
+            mesaj += f"{mod_adi}: %{oran:.1f} ({len(alt)} öneri)\n"
 
-    mesaj += "\nSon 5 sorgu:\n"
+    mesaj += "\nSon 5 öneri:\n"
     for _, satir in degerlendirilen.tail(5).iterrows():
         durum = "✅" if satir['dogru_mu'] else "❌"
-        mesaj += f"  {satir['sembol']} ({satir['tarih'][:7]}): {durum}\n"
+        mesaj += f"  {satir['sembol']} ({str(satir['tarih'])[:7]}): {durum}\n"
 
-    bekleyen = len(df) - len(degerlendirilen)
+    bekleyen = len(trade_onerileri) - len(degerlendirilen)
     if bekleyen > 0:
-        mesaj += f"\n⏳ {bekleyen} sorgu henüz sonuçlanmadı."
+        mesaj += f"\n⏳ {bekleyen} öneri henüz sonuçlanmadı."
+    if risk_uyarisi_sayisi:
+        mesaj += f"\n\n(Ayrıca {risk_uyarisi_sayisi} kez 'long riskli' uyarısı verildi, bu sayıma dahil değil.)"
 
     return mesaj
 
