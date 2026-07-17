@@ -99,8 +99,8 @@ if __name__ == "__main__":
         print("⚠️ Yeterli veri yok, en az 200 örnek gerekiyor. Çıkılıyor.")
         sys.exit(0)
 
-    siniflandirma_model, regresyon_model = modelleri_egit(egitim_kismi, hedef_tarih)
-    modelleri_kaydet(siniflandirma_model, regresyon_model)
+    modeller = modelleri_egit(egitim_kismi, hedef_tarih)
+    modelleri_kaydet(modeller)
 
     # Güncel durum verisini de kaydediyoruz (sorgu.py bunu okuyacak)
     tum_ozellik_df[tum_ozellik_df['tarih'] <= hedef_tarih].to_csv('guncel_veri.csv', index=False)
