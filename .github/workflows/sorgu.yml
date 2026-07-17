@@ -1,5 +1,4 @@
 name: Sorgu Yap
-
 on:
   workflow_dispatch:
     inputs:
@@ -7,30 +6,24 @@ on:
         description: 'Hisse kodu (örn: TUPRS)'
         required: true
         default: 'TUPRS'
-
 permissions:
   contents: write
-
 jobs:
   sorgu:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - run: pip install pandas numpy lightgbm scikit-learn joblib requests
-
+      - run: pip install pandas numpy lightgbm scikit-learn joblib requests pandas_ta_classic
       - name: Sorguyu calistir
         env:
           SORGU_SEMBOL: ${{ github.event.inputs.sembol }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python sorgu.py
-
       - name: Sorgu gecmisini kaydet
         run: |
           git config --global user.name "github-actions"
