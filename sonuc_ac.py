@@ -1,17 +1,16 @@
 """
-SONUÇ AÇIKLAMA MODÜLÜ
-=======================
-Daha önce /sorgu ile yapılan LONG tahminlerinin gerçek sonucunu
-hesaplar. "Risk uyarısı" olarak loglanan satırlar (mod=risk_uyarisi_asagi)
-bir trade önerisi olmadığı için DEĞERLENDİRİLMEZ, atlanır.
+SONUÇ AÇIKLAMA MODÜLÜ (v2 — Hedef1/Stop Bazlı Değerlendirme)
+================================================================
+Daha önce /sorgu ile loglanan LONG önerilerinin gerçek sonucunu
+hesaplar: "Hedef 1'e mi önce ulaşıldı, stop'a mı önce ulaşıldı?"
+Risk uyarısı satırları (mod=risk_uyarisi_asagi) değerlendirilmez.
 """
 
 import pandas as pd
 import os
 
 SORGU_GECMISI_DOSYASI = 'sorgu_gecmisi.csv'
-TAKIP_GUN = 10
-BASARI_ESIGI = 0.03
+MAX_GUN = 40
 
 
 def onceki_sorgulari_degerlendir(tum_ozellik_df, yeni_hedef_tarih):
@@ -29,46 +28,48 @@ def onceki_sorgulari_degerlendir(tum_ozellik_df, yeni_hedef_tarih):
 
     for idx, satir in gecmis.iterrows():
         if pd.notna(satir['gercek_sonuc']):
-            continue  # zaten değerlendirilmiş
+            continue
 
-        # Risk uyarısı satırları bir trade önerisi değil, değerlendirilmez
-        if satir.get('mod') == 'risk_uyarisi_asagi' or pd.isna(satir['tahmin_basari_olasiligi']):
-            gecmis.loc[idx, 'gercek_sonuc'] = -1  # -1: "değerlendirilmez" özel değeri
+        if satir.get('mod') == 'risk_uyarisi_asagi' or pd.isna(satir.get('hedef1_fiyat')):
+            gecmis.loc[idx, 'gercek_sonuc'] = -1  # değerlendirilmez
             continue
 
         sorgu_tarihi = satir['tarih']
         sembol = satir['sembol']
+        hedef1_fiyat = satir['hedef1_fiyat']
+        stop_fiyat = satir.get('stop_fiyat')
 
         hisse_verisi = tum_ozellik_df[
             (tum_ozellik_df['sembol'] == sembol) &
             (tum_ozellik_df['tarih'] > sorgu_tarihi) &
-            (tum_ozellik_df['tarih'] <= sorgu_tarihi + pd.Timedelta(days=TAKIP_GUN * 1.5))
+            (tum_ozellik_df['tarih'] <= sorgu_tarihi + pd.Timedelta(days=MAX_GUN * 1.5))
         ].sort_values('tarih')
 
-        if len(hisse_verisi) < TAKIP_GUN * 0.6:
-            continue  # henüz yeterli gün geçmemiş, bekle
+        if len(hisse_verisi) < MAX_GUN * 0.5:
+            continue  # henüz yeterli gün geçmemiş
 
-        giris_satiri = tum_ozellik_df[
-            (tum_ozellik_df['sembol'] == sembol) & (tum_ozellik_df['tarih'] == sorgu_tarihi)
-        ]
-        if giris_satiri.empty:
-            continue
-        giris_fiyat = giris_satiri.iloc[0]['Close']
+        sonuc = 0
+        for _, gun in hisse_verisi.iterrows():
+            if pd.notna(stop_fiyat) and gun['Low'] <= stop_fiyat:
+                sonuc = 0
+                break
+            if gun['High'] >= hedef1_fiyat:
+                sonuc = 1
+                break
 
-        # Bu sistem artık sadece LONG önerdiği için getiri hep yukarı yönlü ölçülür
-        getiri = (hisse_verisi['Close'].max() - giris_fiyat) / giris_fiyat
+        gecmis.loc[idx, 'gercek_sonuc'] = sonuc
+        giris = satir.get('guncel_fiyat', hedef1_fiyat)
+        gecmis.loc[idx, 'gerceklesen_getiri'] = round((hedef1_fiyat - giris) / giris * 100, 2) if sonuc == 1 else None
 
-        basarili = int(getiri >= BASARI_ESIGI)
-        gecmis.loc[idx, 'gercek_sonuc'] = basarili
-        gecmis.loc[idx, 'gerceklesen_getiri'] = round(getiri * 100, 2)
-
+        olasilik = satir.get('hedef1_olasilik')
         dogru_tahmin = (
-            (satir['tahmin_basari_olasiligi'] >= 0.5 and basarili == 1) or
-            (satir['tahmin_basari_olasiligi'] < 0.5 and basarili == 0)
+            (pd.notna(olasilik) and olasilik >= 0.5 and sonuc == 1) or
+            (pd.notna(olasilik) and olasilik < 0.5 and sonuc == 0)
         )
+        olasilik_metni = f"%{olasilik*100:.0f}" if pd.notna(olasilik) else "?"
         degerlendirilenler.append(
-            f"  {sembol} ({sorgu_tarihi.date()}): tahmin %{satir['tahmin_basari_olasiligi']*100:.0f} "
-            f"→ gerçek {'✅ başarılı' if basarili else '❌ başarısız'} "
+            f"  {sembol} ({sorgu_tarihi.date()}, {satir.get('mod')}): tahmin {olasilik_metni} "
+            f"→ gerçek {'✅ Hedef1' if sonuc else '❌ Stop/zaman aşımı'} "
             f"({'doğru' if dogru_tahmin else 'yanlış'} tahmin)"
         )
 
