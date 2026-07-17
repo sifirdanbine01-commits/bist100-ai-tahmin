@@ -137,6 +137,17 @@ def market_structure_tespit_et(df, sol=3, sag=3):
     df['swing_tip'] = swing_tip
     df['yapi_olay'] = yapi_olay
     df['trend_yonu'] = trend_yonu
+
+    # Stop hesaplaması için: her gün itibariyle EN SON pivot low fiyatı
+    # (yapısal stop referansı - "burası kırılırsa yapı bozulmuş demektir")
+    son_pivot_low_fiyat = [None] * n
+    guncel_son_low = None
+    for i in range(n):
+        if df['pivot_low'].iloc[i]:
+            guncel_son_low = lows[i]
+        son_pivot_low_fiyat[i] = guncel_son_low
+    df['son_pivot_low_fiyat'] = son_pivot_low_fiyat
+
     return df
 
 
