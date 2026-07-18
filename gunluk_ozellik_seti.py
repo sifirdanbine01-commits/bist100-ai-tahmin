@@ -51,15 +51,22 @@ def haftalik_trend_ekle(df_g):
     # bilgi günlük satırlara yansır - lookahead'i böyle engelliyoruz.
     haftalik_trend.index = haftalik_trend.index + pd.Timedelta(days=7)
 
-    gunluk_tarihler = pd.DataFrame({'tarih': df_g.index}).sort_values('tarih')
-    haftalik_df = pd.DataFrame({'tarih': haftalik_trend.index, 'haftalik_trend_yonu': haftalik_trend.values})
+    gunluk_tarihler = pd.DataFrame({'tarih': pd.DatetimeIndex(df_g.index).astype('datetime64[ns]')}).sort_values('tarih')
+    haftalik_df = pd.DataFrame({
+        'tarih': pd.DatetimeIndex(haftalik_trend.index).astype('datetime64[ns]'),
+        'haftalik_trend_yonu': haftalik_trend.values
+    })
     haftalik_df = haftalik_df.sort_values('tarih')
 
     birlesik = pd.merge_asof(gunluk_tarihler, haftalik_df, on='tarih', direction='backward')
     birlesik['haftalik_trend_yonu'] = birlesik['haftalik_trend_yonu'].fillna(0)
 
     df_g = df_g.copy()
-    df_g['haftalik_trend_yonu'] = birlesik.set_index('tarih')['haftalik_trend_yonu'].reindex(df_g.index).values
+    # NOT: gunluk_tarihler, df_g.index'in SIRALANMIŞ hali - OHLCV verisi zaten
+    # kronolojik sırada geldiği için bu, orijinal sırayla birebir örtüşür.
+    # reindex yerine doğrudan pozisyonel atama yaparak datetime dtype
+    # uyuşmazlığı riskini tamamen ortadan kaldırıyoruz.
+    df_g['haftalik_trend_yonu'] = birlesik['haftalik_trend_yonu'].values
     return df_g
 
 
