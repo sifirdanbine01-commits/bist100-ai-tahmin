@@ -64,12 +64,12 @@ tarih,sembol,yon,tahmin_basari_olasiligi,beklenen_getiri_yuzde,mod,gercek_sonuc,
 2024-12-31,TSKB,-1.0,,,risk_uyarisi_asagi,-1.0,,,,,
 2024-12-31,ULKER,-1.0,,,risk_uyarisi_asagi,-1.0,,,,,
 2024-12-31,YKBNK,1.0,0.644,6.47,genel,-1.0,,,,,
-2024-12-31 00:00:00,AEFES,,,,risk_uyarisi_asagi,,,,,,
-2024-12-31 00:00:00,AKBNK,,,,genel,,,61.46490478515625,59.45267087528779,65.39,0.65
-2024-12-31 00:00:00,AKSEN,,,,genel,,,39.20000076293945,38.145927921946246,41.59,0.588
-2024-12-31 00:00:00,ARCLK,,,,genel,,,142.0,138.44505596282556,147.7,0.508
-2024-12-31 00:00:00,TUPRS,,,,risk_uyarisi_asagi,,,,,,
-2024-12-31 00:00:00,AEFES,,,,risk_uyarisi_asagi,,,,,,
-2024-12-31 00:00:00,THYAO,,,,risk_uyarisi_asagi,,,,,,
-2024-12-31 00:00:00,EREGL,,,,risk_uyarisi_asagi,,,,,,
-2024-12-31 00:00:00,KRDMD,,,,risk_uyarisi_asagi,,,,,,
+2024-12-31,AEFES,,,,risk_uyarisi_asagi,-1.0,,,,,
+2024-12-31,AKBNK,,,,genel,0.0,,61.46490478515625,59.45267087528779,65.39,0.65
+2024-12-31,AKSEN,,,,genel,0.0,,39.20000076293945,38.145927921946246,41.59,0.588
+2024-12-31,ARCLK,,,,genel,0.0,,142.0,138.44505596282556,147.7,0.508
+2024-12-31,TUPRS,,,,risk_uyarisi_asagi,-1.0,,,,,
+2024-12-31,AEFES,,,,risk_uyarisi_asagi,-1.0,,,,,
+2024-12-31,THYAO,,,,risk_uyarisi_asagi,-1.0,,,,,
+2024-12-31,EREGL,,,,risk_uyarisi_asagi,-1.0,,,,,
+2024-12-31,KRDMD,,,,risk_uyarisi_asagi,-1.0,,,,,
