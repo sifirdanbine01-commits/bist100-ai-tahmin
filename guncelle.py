@@ -114,6 +114,21 @@ if __name__ == "__main__":
         f"Eğitim Örneği: {len(egitim_kismi)}\n"
     )
 
+    # Feature Importance Raporu - hangi özellik ne kadar etkili öğrenildi
+    try:
+        from gunluk_ozellik_seti import OZELLIK_KOLONLARI
+        if modeller.get('genel_siniflandirma') is not None:
+            onem = pd.Series(
+                modeller['genel_siniflandirma'].feature_importances_,
+                index=OZELLIK_KOLONLARI
+            ).sort_values(ascending=False)
+            onem_yuzde = (onem / onem.sum() * 100).round(1)
+            mesaj += "\n📊 <b>En Etkili 5 Özellik</b> (genel model):\n"
+            for ozellik, yuzde in onem_yuzde.head(5).items():
+                mesaj += f"  {ozellik}: %{yuzde}\n"
+    except Exception as e:
+        print(f"⚠️ Feature importance hesaplanamadı: {e}")
+
     # Önceki sorguların gerçek sonucunu açığa çıkar (varsa)
     if onceki_durum is not None:
         aciklama = onceki_sorgulari_degerlendir(tum_ozellik_df, hedef_tarih)
