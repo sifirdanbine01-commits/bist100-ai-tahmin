@@ -19,17 +19,9 @@ import joblib
 from telegram_bildirim import telegram_mesaj_gonder
 from durum import durumu_oku
 from model_egit import modelleri_yukle
+from gunluk_ozellik_seti import OZELLIK_KOLONLARI
 
 SORGU_GECMISI_DOSYASI = 'sorgu_gecmisi.csv'
-
-OZELLIK_KOLONLARI = [
-    'rsi_14', 'macd_hist', 'adx', 'hacim_orani', 'bb_genislik',
-    'stoch_k', 'fiyat_ma200_ustu', 'ema_kesisim_yukari',
-    'son_bos_gun_farki', 'son_bos_yonu', 'son_bos_gecerli',
-    'trend_yonu', 'direnc_mesafe_yuzde', 'direnc_gucu', 'direnc_kac_gun_otesinde',
-    'destek_mesafe_yuzde', 'destek_gucu', 'destek_kac_gun_altinda',
-    'cizgi_kirildi_choch_bekleniyor', 'cizgi_de_onayladi',
-]
 
 FIB_ORANLARI = {1: 1.272, 2: 1.618, 3: 2.0}
 
