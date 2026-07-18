@@ -73,5 +73,5 @@ tarih,sembol,yon,tahmin_basari_olasiligi,beklenen_getiri_yuzde,mod,gercek_sonuc,
 2024-12-31,THYAO,,,,risk_uyarisi_asagi,-1.0,,,,,
 2024-12-31,EREGL,,,,risk_uyarisi_asagi,-1.0,,,,,
 2024-12-31,KRDMD,,,,risk_uyarisi_asagi,-1.0,,,,,
-2024-12-31 00:00:00,TUPRS,,,,risk_uyarisi_asagi,,,,,,
-2024-12-31 00:00:00,ARCLK,,,,genel,,,142.0,138.44505596282556,148.13,0.504
+2024-12-31,TUPRS,,,,risk_uyarisi_asagi,-1.0,,,,,
+2024-12-31,ARCLK,,,,genel,0.0,,142.0,138.44505596282556,148.13,0.504
