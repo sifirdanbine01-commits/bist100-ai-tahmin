@@ -1,7 +1,9 @@
 """
 VERİ ÇEKME MODÜLÜ
 ==================
-BIST100 hisselerinin geçmiş fiyat verisini çeker.
+BIST hisselerinin geçmiş fiyat verisini çeker.
+Liste genişletildi (104 hisse) - KOZAA/KOZAL kapanmış/adı değişmiş
+oldukları için listeden çıkarıldı (kullanıcı teyidiyle).
 """
 
 import time
@@ -9,14 +11,19 @@ import pandas as pd
 import yfinance as yf
 
 BIST100_HISSELERI = [
-    "THYAO", "ASELS", "EREGL", "GARAN", "AKBNK", "ISCTR", "SISE",
-    "KCHOL", "SAHOL", "TUPRS", "BIMAS", "FROTO", "TOASO", "PGSUS",
-    "TCELL", "TTKOM", "ARCLK", "PETKM", "KOZAL", "KOZAA", "EKGYO",
-    "HALKB", "VAKBN", "YKBNK", "SASA", "ALARK", "AEFES", "MGROS",
-    "ENKAI", "TAVHL", "ULKER", "VESTL", "OTKAR", "DOAS", "KRDMD",
-    "CIMSA", "OYAKC", "TSKB", "AKSA", "AKSEN", "ISGYO", "SOKM",
-    "TKFEN", "ODAS", "GUBRF", "ALBRK", "ISMEN", "KONTR", "SMRTG",
-    "ASTOR", "HEKTS",
+    'AEFES', 'AKBNK', 'AKSA', 'AKSEN', 'ALARK', 'ALBRK', 'ALTNY', 'ANSGR',
+    'ARCLK', 'ASELS', 'ASTOR', 'BALSU', 'BERA', 'BIMAS', 'BRSAN', 'BRYAT',
+    'BSOKE', 'BTCIM', 'CANTE', 'CCOLA', 'CIMSA', 'CVKMD', 'CWENE', 'DAPGM',
+    'DOAS', 'DOHOL', 'DSTKF', 'ECILC', 'EFOR', 'EKGYO', 'ENERY', 'ENJSA',
+    'ENKAI', 'EREGL', 'ESEN', 'EUPWR', 'EUREN', 'FENER', 'FROTO', 'GARAN',
+    'GENIL', 'GESAN', 'GLRMK', 'GRSEL', 'GRTHO', 'GSRAY', 'GUBRF', 'HALKB',
+    'HEKTS', 'IEYHO', 'ISCTR', 'ISGYO', 'ISMEN', 'IZENR', 'KCHOL', 'KLRHO',
+    'KONTR', 'KRDMD', 'KTLEV', 'KUYAS', 'MAGEN', 'MAVI', 'MGROS', 'MIATK',
+    'MPARK', 'OBAMS', 'ODAS', 'ODINE', 'OTKAR', 'OYAKC', 'PAHOL', 'PASEU',
+    'PATEK', 'PETKM', 'PGSUS', 'PSGYO', 'QUAGR', 'RALYH', 'REEDR', 'SAHOL',
+    'SARKY', 'SASA', 'SISE', 'SKBNK', 'SMRTG', 'SOKM', 'TAVHL', 'TCELL',
+    'THYAO', 'TKFEN', 'TOASO', 'TRALT', 'TRENJ', 'TRMET', 'TSKB', 'TTKOM',
+    'TUKAS', 'TUPRS', 'TURSG', 'ULKER', 'VAKBN', 'VESTL', 'YKBNK', 'ZOREN',
 ]
 
 
