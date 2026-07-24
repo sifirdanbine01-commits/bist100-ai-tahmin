@@ -1,9 +1,8 @@
 """
-SONUÇ AÇIKLAMA MODÜLÜ (v2 — Hedef1/Stop Bazlı Değerlendirme)
-================================================================
-Daha önce /sorgu ile loglanan LONG önerilerinin gerçek sonucunu
-hesaplar: "Hedef 1'e mi önce ulaşıldı, stop'a mı önce ulaşıldı?"
-Risk uyarısı satırları (mod=risk_uyarisi_asagi) değerlendirilmez.
+SONUÇ AÇIKLAMA MODÜLÜ (v3 — Tek Akış Log Formatına Göre)
+============================================================
+Genel hedef/stop bazlı değerlendirme yapar. Veto satırları
+(veto=1) değerlendirilmez.
 """
 
 import pandas as pd
@@ -30,13 +29,13 @@ def onceki_sorgulari_degerlendir(tum_ozellik_df, yeni_hedef_tarih):
         if pd.notna(satir['gercek_sonuc']):
             continue
 
-        if satir.get('mod') == 'risk_uyarisi_asagi' or pd.isna(satir.get('hedef1_fiyat')):
+        if satir.get('veto') == 1 or pd.isna(satir.get('genel_hedef')):
             gecmis.loc[idx, 'gercek_sonuc'] = -1  # değerlendirilmez
             continue
 
         sorgu_tarihi = satir['tarih']
         sembol = satir['sembol']
-        hedef1_fiyat = satir['hedef1_fiyat']
+        hedef_fiyat = satir['genel_hedef']
         stop_fiyat = satir.get('stop_fiyat')
 
         hisse_verisi = tum_ozellik_df[
@@ -46,30 +45,32 @@ def onceki_sorgulari_degerlendir(tum_ozellik_df, yeni_hedef_tarih):
         ].sort_values('tarih')
 
         if len(hisse_verisi) < MAX_GUN * 0.5:
-            continue  # henüz yeterli gün geçmemiş
+            continue
 
         sonuc = 0
         for _, gun in hisse_verisi.iterrows():
-            if pd.notna(stop_fiyat) and gun['Low'] <= stop_fiyat:
+            # FİTİL DÜZELTMESİ: Low/High yerine sadece Close (kapanış) 
+            # ile kontrol - gün içi geçici dokunuşlar sayılmasın.
+            if pd.notna(stop_fiyat) and gun['Close'] <= stop_fiyat:
                 sonuc = 0
                 break
-            if gun['High'] >= hedef1_fiyat:
+            if gun['Close'] >= hedef_fiyat:
                 sonuc = 1
                 break
 
         gecmis.loc[idx, 'gercek_sonuc'] = sonuc
-        giris = satir.get('guncel_fiyat', hedef1_fiyat)
-        gecmis.loc[idx, 'gerceklesen_getiri'] = round((hedef1_fiyat - giris) / giris * 100, 2) if sonuc == 1 else None
+        giris = satir.get('guncel_fiyat', hedef_fiyat)
+        gecmis.loc[idx, 'gerceklesen_getiri'] = round((hedef_fiyat - giris) / giris * 100, 2) if sonuc == 1 else None
 
-        olasilik = satir.get('hedef1_olasilik')
+        olasilik = satir.get('genel_olasilik')
         dogru_tahmin = (
             (pd.notna(olasilik) and olasilik >= 0.5 and sonuc == 1) or
             (pd.notna(olasilik) and olasilik < 0.5 and sonuc == 0)
         )
         olasilik_metni = f"%{olasilik*100:.0f}" if pd.notna(olasilik) else "?"
         degerlendirilenler.append(
-            f"  {sembol} ({sorgu_tarihi.date()}, {satir.get('mod')}): tahmin {olasilik_metni} "
-            f"→ gerçek {'✅ Hedef1' if sonuc else '❌ Stop/zaman aşımı'} "
+            f"  {sembol} ({sorgu_tarihi.date()}): tahmin {olasilik_metni} "
+            f"→ gerçek {'✅ Hedef' if sonuc else '❌ Stop/zaman aşımı'} "
             f"({'doğru' if dogru_tahmin else 'yanlış'} tahmin)"
         )
 
