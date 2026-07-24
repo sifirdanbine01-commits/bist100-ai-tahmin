@@ -243,20 +243,22 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
         bitis_idx = min(i + MAX_GUN_HEDEF, n - 1)
         if bitis_idx <= i:
             continue
-        takip_high = df_g['High'].values[i + 1: bitis_idx + 1]
-        takip_low = lows[i + 1: bitis_idx + 1]
-        if len(takip_high) == 0:
+        # FİTİL DÜZELTMESİ: Artık High/Low (gün içi en yüksek/düşük) 
+        # DEĞİL, sadece o günün KAPANIŞ fiyatı sayılıyor - fitille 
+        # geçici dokunuşlar tetikleyici olmasın diye.
+        takip_close = closes[i + 1: bitis_idx + 1]
+        if len(takip_close) == 0:
             continue
 
         for hedef_no, oran in FIB_ORANLARI.items():
             hedef_fiyat = giris + hareket * (oran - 1)
-            # gün gün ilerleyip önce hedefe mi stop'a mı dokunulmuş bak
+            # gün gün ilerleyip önce hedefe mi stop'a mı KAPANIŞLA ulaşılmış bak
             sonuc = None
-            for g in range(len(takip_high)):
-                if takip_low[g] <= stop_ref:
+            for g in range(len(takip_close)):
+                if takip_close[g] <= stop_ref:
                     sonuc = 0
                     break
-                if takip_high[g] >= hedef_fiyat:
+                if takip_close[g] >= hedef_fiyat:
                     sonuc = 1
                     break
             if sonuc is None:
