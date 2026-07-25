@@ -1,9 +1,7 @@
 """
 VERİ ÇEKME MODÜLÜ
 ==================
-BIST hisselerinin geçmiş fiyat verisini çeker.
-Liste genişletildi (104 hisse) - KOZAA/KOZAL kapanmış/adı değişmiş
-oldukları için listeden çıkarıldı (kullanıcı teyidiyle).
+BIST hisselerinin geçmiş fiyat verisini çeker (104 hisse).
 """
 
 import time
