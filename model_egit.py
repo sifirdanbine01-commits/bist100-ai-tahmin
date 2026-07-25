@@ -1,13 +1,9 @@
 """
-ORTAK MODEL EĞİTİM MODÜLÜ (v2 — 5 Model)
-===========================================
-1) Genel Mod Sınıflandırma + Regresyon (yapısal referans yokken fallback)
-2) Hedef 1/2/3 Sınıflandırma (Fibonacci kademeli hedefler, üçlü bariyer
-   etiketleriyle eğitilir - sadece geçerli yapısal referansı olan
-   satırlarla, her hedef kendi NaN olmayan satırlarıyla ayrı eğitilir)
-
-Tüm modeller son 3-4 yıla üstel ağırlık verir (eski veri tamamen
-atılmaz ama güncel "tahtacı karakteri" daha baskın olur).
+ORTAK MODEL EĞİTİM MODÜLÜ (5 Model)
+=====================================
+1) Genel Mod Sınıflandırma + Regresyon (fallback)
+2) Hedef 1/2/3 Sınıflandırma (Fibonacci kademeli hedefler)
+Son 3-4 yıla üstel ağırlık verir.
 """
 
 import numpy as np
@@ -32,15 +28,8 @@ def yakinlik_agirligi_hesapla(tarihler, referans_tarih, yari_omur_yil=3.5):
 
 
 def modelleri_egit(egitim_df, referans_tarih):
-    """
-    Döndürür: dict {model_adi: egitilmis_model}
-    Bir modelin eğitilecek yeterli verisi yoksa (örn. hedef2/3 için
-    henüz az örnek varsa) o model None olarak döner, sorgu.py bunu
-    kontrol edip fallback yapar.
-    """
     modeller = {}
 
-    # ---- Genel Mod (her zaman eğitilir, ana fallback) ----
     genel_veri = egitim_df.dropna(subset=['basarili', 'getiri_yuzde'])
     agirliklar = yakinlik_agirligi_hesapla(genel_veri['tarih'], referans_tarih)
     X = genel_veri[OZELLIK_KOLONLARI]
@@ -59,7 +48,6 @@ def modelleri_egit(egitim_df, referans_tarih):
     regresyon.fit(X, genel_veri['getiri_yuzde'], sample_weight=agirliklar)
     modeller['genel_regresyon'] = regresyon
 
-    # ---- Hedef 1/2/3 (Fibonacci kademeli, üçlü bariyer) ----
     for hedef_no in [1, 2, 3]:
         kolon = f'hedef{hedef_no}_basarili'
         hedef_veri = egitim_df.dropna(subset=[kolon])
