@@ -1,16 +1,12 @@
 """
 TREND ÇİZGİSİ MODÜLÜ
 ======================
-Son 504 işlem günündeki LH (Lower High) noktalarından DİRENÇ çizgisi,
-HL (Higher Low) noktalarından DESTEK çizgisi çizer. Logaritmik
-regresyon kullanır (yüzdesel hareketleri doğru oranlamak için).
+Son 504 işlem günündeki LH noktalarından DİRENÇ, HL noktalarından
+DESTEK çizgisi çizer (logaritmik regresyon). Kırılım SADECE KAPANIŞ
+fiyatıyla sayılır (fitil sayılmaz).
 
-Kırılım tanımı: SADECE KAPANIŞ fiyatı çizgiyi geçerse sayılır,
-fitil (High/Low) ile geçici aşımlar sayılmaz.
-
-"Kaç gündür çizginin ötesinde" sabit bir eşikle "geçersiz" sayılmaz -
-ham sayı olarak modele verilir, model her hissenin kendi davranışına
-göre bunu öğrenir.
+YENİ: Somut fiyat seviyeleri, temas sayısı ve BAŞARISIZ KIRILIM 
+SAYISI da (kullanıcının istediği gibi) takip ediliyor.
 """
 
 import numpy as np
@@ -20,7 +16,6 @@ PENCERE_GUN = 504
 
 
 def _log_regresyon_egim_kesisim(x_gunler, y_fiyatlar):
-    """log(fiyat) = egim * gun + kesisim şeklinde en küçük kareler fit."""
     log_y = np.log(y_fiyatlar)
     egim, kesisim = np.polyfit(x_gunler, log_y, 1)
     return egim, kesisim
@@ -31,11 +26,6 @@ def _cizgi_degeri(egim, kesisim, gun):
 
 
 def trend_cizgilerini_hesapla(df_g):
-    """
-    df_g: market_structure_tespit_et sonrası df (pivot_high, pivot_low,
-          swing_tip kolonları olmalı).
-    Döndürür: df_g'ye eklenen yeni kolonlarla birlikte kopya.
-    """
     n = len(df_g)
     closes = df_g['Close'].values
     highs = df_g['High'].values
@@ -46,18 +36,27 @@ def trend_cizgilerini_hesapla(df_g):
     direnc_mesafe_yuzde = np.full(n, np.nan)
     direnc_gucu = np.zeros(n)
     direnc_kac_gun_otesinde = np.zeros(n)
+    direnc_seviye_fiyat = np.full(n, np.nan)
+    direnc_temas_sayisi = np.zeros(n)
+    direnc_basarisiz_kirilim_sayisi = np.zeros(n)
 
     destek_mesafe_yuzde = np.full(n, np.nan)
     destek_gucu = np.zeros(n)
     destek_kac_gun_altinda = np.zeros(n)
+    destek_seviye_fiyat = np.full(n, np.nan)
+    destek_temas_sayisi = np.zeros(n)
+    destek_basarisiz_kirilim_sayisi = np.zeros(n)
 
     gun_otesinde_sayaci = 0
     gun_altinda_sayaci = 0
+    direnc_onceki_otesinde_mi = False
+    direnc_basarisiz_sayac = 0
+    destek_onceki_altinda_mi = False
+    destek_basarisiz_sayac = 0
 
     for i in range(n):
         pencere_baslangic = max(0, i - PENCERE_GUN)
 
-        # ---- DİRENÇ ÇİZGİSİ (LH noktalarından) ----
         lh_indeksler = [
             j for j in range(pencere_baslangic, i)
             if pivot_high_mask[j] and df_g['swing_tip'].iloc[j] == 'LH'
@@ -71,16 +70,22 @@ def trend_cizgilerini_hesapla(df_g):
                 mesafe = (closes[i] - cizgi_deger) / cizgi_deger * 100
                 direnc_mesafe_yuzde[i] = mesafe
                 direnc_gucu[i] = 2 if len(lh_indeksler) >= 3 else 1
+                direnc_seviye_fiyat[i] = cizgi_deger
+                direnc_temas_sayisi[i] = len(lh_indeksler)
 
-                if closes[i] > cizgi_deger:
+                simdi_otesinde = closes[i] > cizgi_deger
+                if simdi_otesinde:
                     gun_otesinde_sayaci += 1
                 else:
+                    if direnc_onceki_otesinde_mi:
+                        direnc_basarisiz_sayac += 1
                     gun_otesinde_sayaci = 0
+                direnc_onceki_otesinde_mi = simdi_otesinde
                 direnc_kac_gun_otesinde[i] = gun_otesinde_sayaci
+                direnc_basarisiz_kirilim_sayisi[i] = direnc_basarisiz_sayac
             except (np.linalg.LinAlgError, ValueError):
                 pass
 
-        # ---- DESTEK ÇİZGİSİ (HL noktalarından) ----
         hl_indeksler = [
             j for j in range(pencere_baslangic, i)
             if pivot_low_mask[j] and df_g['swing_tip'].iloc[j] == 'HL'
@@ -94,12 +99,19 @@ def trend_cizgilerini_hesapla(df_g):
                 mesafe = (closes[i] - cizgi_deger) / cizgi_deger * 100
                 destek_mesafe_yuzde[i] = mesafe
                 destek_gucu[i] = 2 if len(hl_indeksler) >= 3 else 1
+                destek_seviye_fiyat[i] = cizgi_deger
+                destek_temas_sayisi[i] = len(hl_indeksler)
 
-                if closes[i] < cizgi_deger:
+                simdi_altinda = closes[i] < cizgi_deger
+                if simdi_altinda:
                     gun_altinda_sayaci += 1
                 else:
+                    if destek_onceki_altinda_mi:
+                        destek_basarisiz_sayac += 1
                     gun_altinda_sayaci = 0
+                destek_onceki_altinda_mi = simdi_altinda
                 destek_kac_gun_altinda[i] = gun_altinda_sayaci
+                destek_basarisiz_kirilim_sayisi[i] = destek_basarisiz_sayac
             except (np.linalg.LinAlgError, ValueError):
                 pass
 
@@ -107,11 +119,17 @@ def trend_cizgilerini_hesapla(df_g):
     df_g['direnc_mesafe_yuzde'] = direnc_mesafe_yuzde
     df_g['direnc_gucu'] = direnc_gucu
     df_g['direnc_kac_gun_otesinde'] = direnc_kac_gun_otesinde
+    df_g['direnc_seviye_fiyat'] = direnc_seviye_fiyat
+    df_g['direnc_temas_sayisi'] = direnc_temas_sayisi
+    df_g['direnc_basarisiz_kirilim_sayisi'] = direnc_basarisiz_kirilim_sayisi
+
     df_g['destek_mesafe_yuzde'] = destek_mesafe_yuzde
     df_g['destek_gucu'] = destek_gucu
     df_g['destek_kac_gun_altinda'] = destek_kac_gun_altinda
+    df_g['destek_seviye_fiyat'] = destek_seviye_fiyat
+    df_g['destek_temas_sayisi'] = destek_temas_sayisi
+    df_g['destek_basarisiz_kirilim_sayisi'] = destek_basarisiz_kirilim_sayisi
 
-    # İki özel bayrak: "kırıldı ama CHoCH henüz gelmedi" / "CHoCH de onayladı"
     trend_yonu = df_g['trend_yonu'].values
     cizgi_kirildi_choch_bekleniyor = np.zeros(n)
     cizgi_de_onayladi = np.zeros(n)
