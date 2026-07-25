@@ -1,8 +1,7 @@
 """
-/basari KOMUTU (v2)
-======================
-sorgu_gecmisi.csv'yi okuyup Hedef1 bazlı başarı oranını gösterir.
-Risk uyarısı satırları (mod=risk_uyarisi_asagi) sayıma dahil edilmez.
+/basari KOMUTU
+================
+Genel tahmin bazlı başarı oranını gösterir. Veto satırları hariç.
 """
 
 import pandas as pd
@@ -19,8 +18,8 @@ def basari_raporu_olustur():
 
     df = pd.read_csv(SORGU_GECMISI_DOSYASI)
 
-    risk_uyarisi_sayisi = len(df[df.get('mod') == 'risk_uyarisi_asagi'])
-    trade_onerileri = df[df.get('mod') != 'risk_uyarisi_asagi'].copy()
+    veto_sayisi = len(df[df.get('veto') == 1])
+    trade_onerileri = df[df.get('veto') != 1].copy()
 
     degerlendirilen = trade_onerileri[
         trade_onerileri['gercek_sonuc'].notna() & (trade_onerileri['gercek_sonuc'] != -1)
@@ -29,41 +28,42 @@ def basari_raporu_olustur():
     if degerlendirilen.empty:
         mesaj = (f"📊 Toplam {len(trade_onerileri)} LONG önerisi yapıldı ama henüz "
                   f"hiçbiri sonuçlanmadı (yeterli gün geçmemiş).")
-        if risk_uyarisi_sayisi:
-            mesaj += f"\n\nAyrıca {risk_uyarisi_sayisi} kez 'long riskli' uyarısı verildi."
+        if veto_sayisi:
+            mesaj += f"\n\nAyrıca {veto_sayisi} kez 'long riskli' uyarısı verildi."
         return mesaj
 
     degerlendirilen['dogru_mu'] = (
-        ((degerlendirilen['hedef1_olasilik'] >= 0.5) & (degerlendirilen['gercek_sonuc'] == 1)) |
-        ((degerlendirilen['hedef1_olasilik'] < 0.5) & (degerlendirilen['gercek_sonuc'] == 0))
+        ((degerlendirilen['genel_olasilik'] >= 0.5) & (degerlendirilen['gercek_sonuc'] == 1)) |
+        ((degerlendirilen['genel_olasilik'] < 0.5) & (degerlendirilen['gercek_sonuc'] == 0))
     )
 
     genel_dogruluk = degerlendirilen['dogru_mu'].mean() * 100
+    fib_mevcut = degerlendirilen['hedef1_fiyat'].notna() if 'hedef1_fiyat' in degerlendirilen.columns else pd.Series([False] * len(degerlendirilen))
 
     mesaj = (
-        f"📊 <b>Başarı Takibi (Hedef 1 Bazlı)</b>\n\n"
+        f"📊 <b>Başarı Takibi</b>\n\n"
         f"Toplam sonuçlanan öneri: {len(degerlendirilen)}\n"
-        f"Genel doğruluk: %{genel_dogruluk:.1f}\n\n"
+        f"Genel doğruluk: %{genel_dogruluk:.1f}\n"
+        f"Fibonacci kademeli hedefli öneri sayısı: {fib_mevcut.sum()}\n\n"
     )
 
-    for mod in ['yapisal', 'cizgi', 'genel']:
-        alt = degerlendirilen[degerlendirilen['mod'] == mod]
-        if len(alt) > 0:
-            oran = alt['dogru_mu'].mean() * 100
-            mod_adi = {'yapisal': 'Yapısal Sinyal Modu', 'cizgi': 'Trend Çizgisi Modu',
-                       'genel': 'Genel Hareket Modu'}[mod]
-            mesaj += f"{mod_adi}: %{oran:.1f} ({len(alt)} öneri)\n"
+    if fib_mevcut.sum() > 0:
+        fib_dogruluk = degerlendirilen[fib_mevcut]['dogru_mu'].mean() * 100
+        genel_sade_dogruluk = degerlendirilen[~fib_mevcut]['dogru_mu'].mean() * 100 if (~fib_mevcut).sum() > 0 else None
+        mesaj += f"Fibonacci verisi olan önerilerde doğruluk: %{fib_dogruluk:.1f}\n"
+        if genel_sade_dogruluk is not None:
+            mesaj += f"Sadece genel veriyle önerilerde doğruluk: %{genel_sade_dogruluk:.1f}\n"
 
     mesaj += "\nSon 5 öneri:\n"
     for _, satir in degerlendirilen.tail(5).iterrows():
         durum = "✅" if satir['dogru_mu'] else "❌"
-        mesaj += f"  {satir['sembol']} ({str(satir['tarih'])[:7]}, {satir['mod']}): {durum}\n"
+        mesaj += f"  {satir['sembol']} ({str(satir['tarih'])[:7]}): {durum}\n"
 
     bekleyen = len(trade_onerileri) - len(degerlendirilen)
     if bekleyen > 0:
         mesaj += f"\n⏳ {bekleyen} öneri henüz sonuçlanmadı."
-    if risk_uyarisi_sayisi:
-        mesaj += f"\n\n(Ayrıca {risk_uyarisi_sayisi} kez 'long riskli' uyarısı verildi.)"
+    if veto_sayisi:
+        mesaj += f"\n\n(Ayrıca {veto_sayisi} kez 'long riskli' uyarısı verildi.)"
 
     return mesaj
 
