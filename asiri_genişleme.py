@@ -40,4 +40,4 @@ def asiri_genisleme_ekle(df_g):
     # |z| > 2 -> bu hissenin kendi normaline göre "olağandışı" büyük hareket
     df_g['asiri_genisleme_bayragi'] = (z_skoru.abs() > 2).astype(int).values
 
-    return df_g
+    return df_g 
