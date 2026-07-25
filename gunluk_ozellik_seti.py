@@ -1,17 +1,12 @@
 """
-GÜNLÜK ÖZELLİK SETİ OLUŞTURUCU (v2 — Trend Çizgisi + Fibonacci Kademeli Hedef)
-================================================================================
-Her hissenin HER GÜNÜ için:
-  - Teknik göstergeler
-  - Yapısal sinyal durumu (BOS/CHoCH, trend_yonu)
-  - Trend çizgisi durumu (direnç/destek, kırılım bilgisi)
-  - Son YUKARI swing'in fiyatları (Fibonacci hedef hesaplaması için)
-  - İKİ AYRI ETİKET SETİ:
-      1) Genel regresyon/sınıflandırma etiketi (yapısal referans yokken
-         fallback olarak kullanılır - eski sistemle aynı)
-      2) Fibonacci uzantı hedeflerine (1.272/1.618/2.0) göre ÜÇLÜ
-         BARİYER etiketleri (hedef1/2/3_basarili) - yapısal/çizgi
-         modunda kullanılır
+GÜNLÜK ÖZELLİK SETİ OLUŞTURUCU (v3 — Fitil Düzeltmeli + Genişletilmiş)
+========================================================================
+Her hissenin HER GÜNÜ için teknik göstergeler, yapısal sinyal durumu,
+trend çizgisi, haftalık uyum, likidite avı, düzeltme derinliği,
+aşırı genişleme ve FVG bilgisini birleştirir.
+
+FİTİL DÜZELTMESİ: Hedef1/2/3 etiketlemesinde artık SADECE KAPANIŞ 
+fiyatı sayılıyor (High/Low fitilleri tetikleyici değil).
 """
 
 import pandas as pd
@@ -20,22 +15,16 @@ import numpy as np
 from market_structure import market_structure_tespit_et
 from gostergeler import gostergeleri_ekle
 from trend_cizgisi import trend_cizgilerini_hesapla
+from asiri_genisleme import asiri_genisleme_ekle
+from fvg import fvg_ekle
 
-TAKIP_GUN = 10          # genel mod etiketi için (eski sistem)
+TAKIP_GUN = 10
 BASARI_ESIGI = 0.03
-MAX_GUN_HEDEF = 40       # Fibonacci hedefleri için üçlü bariyer süresi
+MAX_GUN_HEDEF = 40
 FIB_ORANLARI = {1: 1.272, 2: 1.618, 3: 2.0}
 
 
 def haftalik_trend_ekle(df_g):
-    """
-    Günlük veriyi haftalığa indirger, aynı market_structure fonksiyonuyla
-    haftalık trend_yonu hesaplar. LOOKAHEAD OLMASIN diye: bir haftanın
-    trend bilgisi, o hafta TAMAMEN BİTMEDEN (bir sonraki haftaya
-    geçilmeden) günlük satırlara YANSITILMAZ - yani Pazartesi günü,
-    o haftanın henüz oluşmamış Cuma kapanışını "bilmiyor" olur, sadece
-    bir önceki TAMAMLANMIŞ haftanın trend bilgisini görür.
-    """
     haftalik = df_g[['Open', 'High', 'Low', 'Close', 'Volume']].resample('W-FRI').agg({
         'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
     }).dropna()
@@ -47,8 +36,6 @@ def haftalik_trend_ekle(df_g):
 
     haftalik_ms = market_structure_tespit_et(haftalik)
     haftalik_trend = haftalik_ms['trend_yonu'].copy()
-    # Bir hafta TAMAMLANDIKTAN SONRA (bir sonraki haftadan itibaren)
-    # bilgi günlük satırlara yansır - lookahead'i böyle engelliyoruz.
     haftalik_trend.index = haftalik_trend.index + pd.Timedelta(days=7)
 
     gunluk_tarihler = pd.DataFrame({'tarih': pd.DatetimeIndex(df_g.index).astype('datetime64[ns]')}).sort_values('tarih')
@@ -62,10 +49,6 @@ def haftalik_trend_ekle(df_g):
     birlesik['haftalik_trend_yonu'] = birlesik['haftalik_trend_yonu'].fillna(0)
 
     df_g = df_g.copy()
-    # NOT: gunluk_tarihler, df_g.index'in SIRALANMIŞ hali - OHLCV verisi zaten
-    # kronolojik sırada geldiği için bu, orijinal sırayla birebir örtüşür.
-    # reindex yerine doğrudan pozisyonel atama yaparak datetime dtype
-    # uyuşmazlığı riskini tamamen ortadan kaldırıyoruz.
     df_g['haftalik_trend_yonu'] = birlesik['haftalik_trend_yonu'].values
     return df_g
 
@@ -77,23 +60,18 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
                              'yapi_olay', 'trend_yonu', 'son_pivot_low_fiyat']])
     df_g = trend_cizgilerini_hesapla(df_g)
     df_g = haftalik_trend_ekle(df_g)
+    df_g = asiri_genisleme_ekle(df_g)
+    df_g = fvg_ekle(df_g)
 
     n = len(df_g)
     closes = df_g['Close'].values
     lows = df_g['Low'].values
     yapi_olaylari = df_g['yapi_olay'].values
 
-    # Çoklu zaman dilimi uyumu (kalıcı - bir sonraki aşağı olaya kadar taşınır)
-    coklu_zaman_uyumu = np.zeros(n)
-
-    # ---- Yapısal (BOS) takip: yön, geçerlilik, gün farkı ----
     son_bos_gun_index = np.full(n, -1)
     son_bos_yonu = np.zeros(n)
     son_bos_gecerli = np.zeros(n)
 
-    # ---- Son YUKARI swing referansı (Fibonacci hedefleri için) ----
-    # BOS_YUKARI oluştuğunda: giriş fiyatı = o günün kapanışı,
-    # swing başlangıcı = ondan önceki en yakın pivot_low fiyatı.
     son_yukari_giris_fiyat = np.full(n, np.nan)
     son_yukari_swing_baslangic = np.full(n, np.nan)
 
@@ -102,12 +80,6 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
     guncel_yukari_giris = np.nan
     guncel_yukari_baslangic = np.nan
 
-    # ---- Düzeltme Derinliği Takibi (SADECE BİLGİ, TETİKLEYİCİ DEĞİL) ----
-    # A = düzeltmeden önceki zirve (CHoCH_ASAGI anındaki en yakın pivot_high)
-    # B = düzeltmenin dibi (CHoCH_YUKARI anındaki kapanış)
-    # Derinlik = (A-B)/A - bu asla "düzeltme bitti" kararını TETİKLEMEZ,
-    # sadece CHoCH_YUKARI zaten oluştuktan SONRA, o sinyale eklenen
-    # açıklayıcı bir bilgi olarak modele verilir.
     aktif_A_fiyati = np.nan
     duzeltme_derinlik_yuzde = np.full(n, np.nan)
     guncel_derinlik = np.nan
@@ -126,12 +98,8 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
 
     haftalik_trend_arr = df_g['haftalik_trend_yonu'].values
     guncel_coklu_uyum = 0
+    coklu_zaman_uyumu = np.zeros(n)
 
-    # ---- Likidite Avı (Wyckoff Spring / Liquidity Sweep) Tespiti ----
-    # CHoCH_YUKARI oluşmadan önceki son 5 gün içinde, fiyat önceki
-    # pivot_low seviyesinin ALTINA inip (stop'ları "avlayıp") sonra
-    # CHoCH_YUKARI gününde o seviyenin ÜSTÜNE kapanışla dönmüş mü?
-    # Bu, sıradan bir CHoCH'tan daha güvenilir bir dönüş sinyali sayılır.
     SWEEP_PENCERE = 5
     likidite_avi_teyitli = np.zeros(n)
     son_pivot_low_arr = df_g['son_pivot_low_fiyat'].values
@@ -201,9 +169,6 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
     df_g['coklu_zaman_uyumu'] = coklu_zaman_uyumu
     df_g['sembol'] = sembol
 
-    # ============================================================
-    # ETİKET SETİ 1: Genel mod (eski sistem, fallback için)
-    # ============================================================
     basarili = np.full(n, np.nan)
     getiri_yuzde = np.full(n, np.nan)
     for i in range(n - takip_gun):
@@ -219,10 +184,6 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
     df_g['basarili'] = basarili
     df_g['getiri_yuzde'] = getiri_yuzde
 
-    # ============================================================
-    # ETİKET SETİ 2: Fibonacci kademeli hedef (üçlü bariyer)
-    # Sadece geçerli bir "son yukarı swing" varsa hesaplanır.
-    # ============================================================
     for hedef_no, oran in FIB_ORANLARI.items():
         df_g[f'hedef{hedef_no}_basarili'] = np.nan
 
@@ -234,7 +195,7 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
         if pd.isna(giris) or pd.isna(baslangic) or pd.isna(stop_ref):
             continue
         if stop_ref >= closes[i]:
-            continue  # anlamsız stop (fiyatın üstünde), atla
+            continue
 
         hareket = giris - baslangic
         if hareket <= 0:
@@ -243,26 +204,27 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
         bitis_idx = min(i + MAX_GUN_HEDEF, n - 1)
         if bitis_idx <= i:
             continue
-        # FİTİL DÜZELTMESİ: Artık High/Low (gün içi en yüksek/düşük) 
-        # DEĞİL, sadece o günün KAPANIŞ fiyatı sayılıyor - fitille 
-        # geçici dokunuşlar tetikleyici olmasın diye.
+        # ASİMETRİK KURAL: Hedef (kâr-al) için FİTİL (gün içi High) yeterli
+        # sayılır - gerçek trading'de limit emri gibi çalışır, fiyat 
+        # dokunur dokunmaz gerçekleşir. STOP için ise hâlâ SADECE 
+        # KAPANIŞ sayılır - geçici fitil dokunuşları stop'u tetiklemez.
+        takip_high = df_g['High'].values[i + 1: bitis_idx + 1]
         takip_close = closes[i + 1: bitis_idx + 1]
-        if len(takip_close) == 0:
+        if len(takip_high) == 0:
             continue
 
         for hedef_no, oran in FIB_ORANLARI.items():
             hedef_fiyat = giris + hareket * (oran - 1)
-            # gün gün ilerleyip önce hedefe mi stop'a mı KAPANIŞLA ulaşılmış bak
             sonuc = None
-            for g in range(len(takip_close)):
+            for g in range(len(takip_high)):
                 if takip_close[g] <= stop_ref:
                     sonuc = 0
                     break
-                if takip_close[g] >= hedef_fiyat:
+                if takip_high[g] >= hedef_fiyat:
                     sonuc = 1
                     break
             if sonuc is None:
-                sonuc = 0  # zaman aşımı = başarısız sayılır
+                sonuc = 0
             df_g.loc[df_g.index[i], f'hedef{hedef_no}_basarili'] = sonuc
 
     return df_g
@@ -278,9 +240,11 @@ OZELLIK_KOLONLARI = [
     'duzeltme_derinlik_yuzde',
     'haftalik_trend_yonu', 'coklu_zaman_uyumu',
     'likidite_avi_teyitli',
+    'direnc_temas_sayisi', 'direnc_basarisiz_kirilim_sayisi',
+    'destek_temas_sayisi', 'destek_basarisiz_kirilim_sayisi',
+    'son_21_gun_getiri_yuzde', 'asiri_genisleme_zskoru', 'asiri_genisleme_bayragi',
+    'yakin_bogaFVG_var',
 ]
-
-FIB_OZELLIK_KOLONLARI = OZELLIK_KOLONLARI  # aynı özellik seti, farklı etiketle eğitilecek
 
 
 def tum_hisseler_icin_gunluk_ozellik_seti(veri_sozlugu):
@@ -292,9 +256,6 @@ def tum_hisseler_icin_gunluk_ozellik_seti(veri_sozlugu):
         except Exception as e:
             print(f"  ⚠️ {sembol} için özellik hesaplanamadı: {e}")
     birlesik = pd.concat(tum_df, ignore_index=True)
-    # Genel mod etiketleri için satırları at, ama Fibonacci etiketleri NaN
-    # olabilir (yapısal referans yoksa) - o satırları TAMAMEN atmıyoruz,
-    # sadece genel mod eğitimi için ayrı filtreleme model_egit.py'de yapılacak.
     birlesik = birlesik.dropna(subset=OZELLIK_KOLONLARI)
     birlesik['tarih'] = pd.to_datetime(birlesik['tarih'])
     return birlesik
