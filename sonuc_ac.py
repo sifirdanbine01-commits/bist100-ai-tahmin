@@ -1,8 +1,8 @@
 """
-SONUÇ AÇIKLAMA MODÜLÜ (v3 — Tek Akış Log Formatına Göre)
-============================================================
-Genel hedef/stop bazlı değerlendirme yapar. Veto satırları
-(veto=1) değerlendirilmez.
+SONUÇ AÇIKLAMA MODÜLÜ (Fitil Düzeltmeli)
+==========================================
+Genel hedef/stop bazlı değerlendirme. Sadece KAPANIŞ fiyatı sayılır
+(fitil sayılmaz). Veto satırları değerlendirilmez.
 """
 
 import pandas as pd
@@ -30,7 +30,7 @@ def onceki_sorgulari_degerlendir(tum_ozellik_df, yeni_hedef_tarih):
             continue
 
         if satir.get('veto') == 1 or pd.isna(satir.get('genel_hedef')):
-            gecmis.loc[idx, 'gercek_sonuc'] = -1  # değerlendirilmez
+            gecmis.loc[idx, 'gercek_sonuc'] = -1
             continue
 
         sorgu_tarihi = satir['tarih']
@@ -49,12 +49,11 @@ def onceki_sorgulari_degerlendir(tum_ozellik_df, yeni_hedef_tarih):
 
         sonuc = 0
         for _, gun in hisse_verisi.iterrows():
-            # FİTİL DÜZELTMESİ: Low/High yerine sadece Close (kapanış) 
-            # ile kontrol - gün içi geçici dokunuşlar sayılmasın.
+            # ASİMETRİK KURAL: Stop -> sadece kapanış, Hedef -> fitil yeterli
             if pd.notna(stop_fiyat) and gun['Close'] <= stop_fiyat:
                 sonuc = 0
                 break
-            if gun['Close'] >= hedef_fiyat:
+            if gun['High'] >= hedef_fiyat:
                 sonuc = 1
                 break
 
