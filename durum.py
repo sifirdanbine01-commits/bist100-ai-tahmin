@@ -1,9 +1,7 @@
 """
 DURUM YÖNETİMİ
 ===============
-"Model şu an hangi tarihe kadar öğrendi" bilgisini bir dosyada saklar.
-Bu dosya her /egit veya /ilerlet sonrası güncellenir ve git commit
-ile repoya geri yazılır - böylece bir sonraki çalıştırmada hatırlanır.
+"Model şu an hangi tarihe kadar öğrendi" bilgisini saklar.
 """
 
 import json
