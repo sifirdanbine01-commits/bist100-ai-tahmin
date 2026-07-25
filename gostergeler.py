@@ -58,20 +58,3 @@ def gostergeleri_ekle(df):
     df['fiyat_ma200_ustu'] = (df['Close'] > df['ma200']).astype(int)
 
     return df
-
-
-if __name__ == "__main__":
-    df = pd.read_csv('/home/claude/bist_ai_tahmin/ornek_thyao.csv', index_col=0, parse_dates=True)
-    df_g = gostergeleri_ekle(df)
-
-    print("Eklenen gösterge kolonları:")
-    yeni_kolonlar = [c for c in df_g.columns if c not in df.columns]
-    print(yeni_kolonlar)
-
-    print("\nSon 5 gün özet:")
-    print(df_g[['Close', 'rsi_14', 'macd', 'adx', 'hacim_orani']].tail())
-
-    print(f"\nNaN oranı (ilk göstergelerin oturması için normal): "
-          f"{df_g['rsi_14'].isna().sum()} satır RSI hesaplanamamış (en baştaki dönem)")
-
-    df_g.to_csv('/home/claude/bist_ai_tahmin/thyao_gostergeler.csv')
