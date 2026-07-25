@@ -1,22 +1,12 @@
 """
-/sorgu KOMUTU (v3 — Tek Akış, Dallanma Yok)
-==============================================
-ESKİ TASARIMDAKİ SORUN: "Yapısal Mod / Çizgi Modu / Genel Mod" diye
-üç ayrı dal vardı, biri seçilince diğerleri tamamen görmezden
-geliniyordu - bu yüzden çoğu sorguda sadece "Genel Hareket Modu,
-yapısal referans yok" gibi zayıf bir mesaj görünüyordu, halbuki
-trend çizgisi/haftalık uyum/likidite avı gibi zengin bilgiler zaten
-o "genel" modelin İÇİNDE kullanılıyordu ama SANA gösterilmiyordu.
+/sorgu KOMUTU (v4 — Genişletilmiş Bağlam + SHAP Açıklaması)
+================================================================
+Tek akış: Veto (trend_yonu) -> Genel Tahmin (her zaman) -> 
+Fibonacci Kademeli Hedefler (varsa, ek olarak).
 
-YENİ TASARIM:
-1) VETO (tek koşulsuz güvenlik kuralı - kalıyor, kaldırılmadı)
-2) Genel olasılık/hedef HER ZAMAN hesaplanır ve gösterilir
-   (model zaten trend_yonu, çizgi, haftalık uyum, likidite avı
-   dahil TÜM 24 özelliği görüyor - "genel" demek "zayıf" değil,
-   sadece "kademeli Fibonacci hedefi ek olarak yok" demek)
-3) Fibonacci kademeli hedefler (Hedef1/2/3), hesaplanabiliyorsa
-   (yapısal swing verisi varsa) HER ZAMAN genel tahminin YANINA
-   EK bilgi olarak eklenir - onun yerine geçmez, bir "mod" değildir
+YENİ: Somut direnç/destek fiyat seviyeleri, temas sayısı, 
+başarısız kırılım sayısı, aşırı genişleme ve FVG bilgisi de 
+bağlam olarak gösteriliyor.
 """
 
 import os
@@ -32,17 +22,12 @@ FIB_ORANLARI = {1: 1.272, 2: 1.618, 3: 2.0}
 
 
 def shap_aciklama_uret(model, X, ust_kac=3):
-    """
-    Bu SPESİFİK tahmine hangi özelliklerin ne kadar (olumlu/olumsuz)
-    katkı sağladığını döndürür. Model çalışamazsa None döner (mesajı
-    bozmadan sessizce atlanır).
-    """
     try:
         import shap
         explainer = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(X)
         if isinstance(shap_values, list):
-            degerler = shap_values[1][0]  # pozitif sınıf (başarılı)
+            degerler = shap_values[1][0]
         else:
             degerler = shap_values[0]
         seri = pd.Series(degerler, index=X.columns).sort_values(ascending=False)
@@ -68,6 +53,55 @@ def sorgu_logla(egitim_tarihi, sembol, detay: dict):
     birlesik.to_csv(SORGU_GECMISI_DOSYASI, index=False)
 
 
+def bağlam_satirlarini_olustur(son):
+    """Genişletilmiş bağlam: yapısal sinyaller + somut seviyeler + yeni özellikler."""
+    satirlar = []
+
+    if son.get('son_bos_gecerli') == 1 and son.get('son_bos_yonu') == 1:
+        satirlar.append(f"✓ Geçerli BOS_YUKARI ({int(son['son_bos_gun_farki'])} gün önce)")
+
+    if son.get('cizgi_de_onayladi') == 1:
+        satirlar.append("✓ Trend çizgisi kırılımı + CHoCH aynı yönde onaylı")
+    elif son.get('cizgi_kirildi_choch_bekleniyor') == 1:
+        satirlar.append("✓ Direnç çizgisi kırıldı, CHoCH henüz teyit etmedi")
+
+    if son.get('coklu_zaman_uyumu') == 1:
+        satirlar.append("✓ Haftalık trend de YUKARI yönlü uyumlu")
+
+    if son.get('likidite_avi_teyitli') == 1:
+        satirlar.append("✓ Son dönüşte likidite avı (Wyckoff Spring) tespit edildi")
+
+    if pd.notna(son.get('duzeltme_derinlik_yuzde')):
+        satirlar.append(f"ℹ️ Son düzeltme derinliği: %{son['duzeltme_derinlik_yuzde']:.1f}")
+
+    # YENİ: Somut direnç/destek seviyeleri + temas/başarısız kırılım sayısı
+    if pd.notna(son.get('direnc_seviye_fiyat')):
+        satirlar.append(
+            f"📍 Direnç: {son['direnc_seviye_fiyat']:.2f} TL "
+            f"({int(son.get('direnc_temas_sayisi', 0))} temas, "
+            f"{int(son.get('direnc_basarisiz_kirilim_sayisi', 0))} başarısız kırılım denemesi)"
+        )
+    if pd.notna(son.get('destek_seviye_fiyat')):
+        satirlar.append(
+            f"📍 Destek: {son['destek_seviye_fiyat']:.2f} TL "
+            f"({int(son.get('destek_temas_sayisi', 0))} temas, "
+            f"{int(son.get('destek_basarisiz_kirilim_sayisi', 0))} başarısız kırılım denemesi)"
+        )
+
+    # YENİ: Aşırı genişleme uyarısı
+    if son.get('asiri_genisleme_bayragi') == 1:
+        satirlar.append(
+            f"⚠️ Aşırı genişleme: son 21 günde %{son.get('son_21_gun_getiri_yuzde', 0):.1f} "
+            f"hareket - bu hissenin normalinin ÇOK üstünde, düzeltme riski artmış olabilir"
+        )
+
+    # YENİ: FVG bilgisi
+    if son.get('yakin_bogaFVG_var') == 1:
+        satirlar.append("ℹ️ Yakın zamanda doldurulmamış bir Fair Value Gap (FVG) var")
+
+    return satirlar
+
+
 def sorgula(sembol):
     durum = durumu_oku()
     if durum is None:
@@ -86,9 +120,7 @@ def sorgula(sembol):
     son = hisse_verisi.iloc[-1]
     guncel_fiyat = float(son['Close'])
 
-    # ============================================================
-    # ADIM 1 — VETO (Tek Koşulsuz Güvenlik Kuralı)
-    # ============================================================
+    # ADIM 1 — VETO
     trend_yonu = son.get('trend_yonu', 0)
     if pd.notna(trend_yonu) and int(trend_yonu) == -1:
         mesaj = (
@@ -97,7 +129,6 @@ def sorgula(sembol):
             f"bu hissede şu an düşüş yapısı hâkim olduğu için LONG pozisyon "
             f"açmak riskli olabilir.\n\n🚫 Hedef/stop önerisi verilmiyor.\n"
         )
-        # "Neden riskli" - hangi göstergeler bu düşüş görünümüne katkı sağlıyor
         try:
             eksik_kolon_veto = [k for k in OZELLIK_KOLONLARI if pd.isna(son.get(k))]
             if not eksik_kolon_veto:
@@ -122,9 +153,7 @@ def sorgula(sembol):
     X = pd.DataFrame([son[OZELLIK_KOLONLARI].to_dict()]).astype(float)
     modeller = modelleri_yukle()
 
-    # ============================================================
-    # ADIM 2 — GENEL TAHMİN (HER ZAMAN HESAPLANIR, ANA GÖVDE)
-    # ============================================================
+    # ADIM 2 — GENEL TAHMİN (her zaman)
     if modeller.get('genel_siniflandirma') is None or modeller.get('genel_regresyon') is None:
         return f"⚠️ {sembol} için model bulunamadı, önce eğitim yapılmalı."
 
@@ -134,21 +163,7 @@ def sorgula(sembol):
     atr = float(son.get('atr', guncel_fiyat * 0.02))
     genel_stop = guncel_fiyat - 1 * atr
 
-    # Bu tahmine katkı sağlayan yapısal bağlam bilgileri (şeffaflık için)
-    baglam_satirlari = []
-    if son.get('son_bos_gecerli') == 1 and son.get('son_bos_yonu') == 1:
-        baglam_satirlari.append(f"✓ Geçerli BOS_YUKARI ({int(son['son_bos_gun_farki'])} gün önce)")
-    if son.get('cizgi_de_onayladi') == 1:
-        baglam_satirlari.append("✓ Trend çizgisi kırılımı + CHoCH aynı yönde onaylı")
-    elif son.get('cizgi_kirildi_choch_bekleniyor') == 1:
-        baglam_satirlari.append("✓ Direnç çizgisi kırıldı, CHoCH henüz teyit etmedi")
-    if son.get('coklu_zaman_uyumu') == 1:
-        baglam_satirlari.append("✓ Haftalık trend de YUKARI yönlü uyumlu")
-    if son.get('likidite_avi_teyitli') == 1:
-        baglam_satirlari.append("✓ Son dönüşte likidite avı (Wyckoff Spring) tespit edildi")
-    if pd.notna(son.get('duzeltme_derinlik_yuzde')):
-        baglam_satirlari.append(f"ℹ️ Son düzeltme derinliği: %{son['duzeltme_derinlik_yuzde']:.1f}")
-
+    baglam_satirlari = bağlam_satirlarini_olustur(son)
     baglam_metni = "\n".join(baglam_satirlari) if baglam_satirlari else "Belirgin ek yapısal bağlam yok"
 
     hedef_mesafe = genel_hedef - guncel_fiyat
@@ -167,7 +182,6 @@ def sorgula(sembol):
         f"⚖️ R/R: 1:{rr_orani:.2f}{rr_uyarisi}\n"
     )
 
-    # "Neden bu olasılık" - hangi özellikler tahmini yukarı/aşağı çekti
     olumlu, olumsuz = shap_aciklama_uret(modeller['genel_siniflandirma'], X)
     if olumlu is not None:
         if len(olumlu) > 0:
@@ -186,9 +200,7 @@ def sorgula(sembol):
         'stop_fiyat': genel_stop,
     }
 
-    # ============================================================
-    # ADIM 3 — FİBONACCİ KADEMELİ HEDEFLER (VARSA, EK BİLGİ OLARAK)
-    # ============================================================
+    # ADIM 3 — FİBONACCİ KADEMELİ HEDEFLER (varsa, ek bilgi)
     giris_fiyat = son.get('son_yukari_giris_fiyat')
     swing_baslangic = son.get('son_yukari_swing_baslangic')
     stop_ref = son.get('son_pivot_low_fiyat')
