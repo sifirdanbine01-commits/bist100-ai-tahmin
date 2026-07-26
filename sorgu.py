@@ -53,7 +53,29 @@ def sorgu_logla(egitim_tarihi, sembol, detay: dict):
     birlesik.to_csv(SORGU_GECMISI_DOSYASI, index=False)
 
 
-def bağlam_satirlarini_olustur(son):
+PENCERE_GUN = 504  # trend_cizgisi.py ile aynı pencere
+
+
+def temas_noktalarini_bul(hisse_verisi, max_goster=4):
+    """
+    Direnç (LH) ve destek (HL) çizgisini oluşturan GERÇEK temas 
+    noktalarının tarih ve fiyatlarını döndürür - son 504 gün 
+    penceresinden, en yakın tarihten geriye doğru.
+    """
+    son_pencere = hisse_verisi.tail(PENCERE_GUN)
+
+    lh_noktalar = son_pencere[
+        (son_pencere['pivot_high'] == True) & (son_pencere['swing_tip'] == 'LH')
+    ][['tarih', 'High']].tail(max_goster)
+
+    hl_noktalar = son_pencere[
+        (son_pencere['pivot_low'] == True) & (son_pencere['swing_tip'] == 'HL')
+    ][['tarih', 'Low']].tail(max_goster)
+
+    return lh_noktalar, hl_noktalar
+
+
+def bağlam_satirlarini_olustur(son, hisse_verisi=None):
     """Genişletilmiş bağlam: yapısal sinyaller + somut seviyeler + yeni özellikler."""
     satirlar = []
 
@@ -75,18 +97,36 @@ def bağlam_satirlarini_olustur(son):
         satirlar.append(f"ℹ️ Son düzeltme derinliği: %{son['duzeltme_derinlik_yuzde']:.1f}")
 
     # YENİ: Somut direnç/destek seviyeleri + temas/başarısız kırılım sayısı
+    # + GERÇEK TEMAS NOKTALARI (tarih ve fiyat)
     if pd.notna(son.get('direnc_seviye_fiyat')):
         satirlar.append(
             f"📍 Direnç: {son['direnc_seviye_fiyat']:.2f} TL "
             f"({int(son.get('direnc_temas_sayisi', 0))} temas, "
             f"{int(son.get('direnc_basarisiz_kirilim_sayisi', 0))} başarısız kırılım denemesi)"
         )
+        if hisse_verisi is not None:
+            lh_noktalar, _ = temas_noktalarini_bul(hisse_verisi)
+            if not lh_noktalar.empty:
+                nokta_metinleri = [
+                    f"{pd.Timestamp(r['tarih']).strftime('%d.%m.%Y')}@{r['High']:.2f}"
+                    for _, r in lh_noktalar.iterrows()
+                ]
+                satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
+
     if pd.notna(son.get('destek_seviye_fiyat')):
         satirlar.append(
             f"📍 Destek: {son['destek_seviye_fiyat']:.2f} TL "
             f"({int(son.get('destek_temas_sayisi', 0))} temas, "
             f"{int(son.get('destek_basarisiz_kirilim_sayisi', 0))} başarısız kırılım denemesi)"
         )
+        if hisse_verisi is not None:
+            _, hl_noktalar = temas_noktalarini_bul(hisse_verisi)
+            if not hl_noktalar.empty:
+                nokta_metinleri = [
+                    f"{pd.Timestamp(r['tarih']).strftime('%d.%m.%Y')}@{r['Low']:.2f}"
+                    for _, r in hl_noktalar.iterrows()
+                ]
+                satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
 
     # YENİ: Aşırı genişleme uyarısı
     if son.get('asiri_genisleme_bayragi') == 1:
@@ -163,7 +203,33 @@ def sorgula(sembol):
     atr = float(son.get('atr', guncel_fiyat * 0.02))
     genel_stop = guncel_fiyat - 1 * atr
 
-    baglam_satirlari = bağlam_satirlarini_olustur(son)
+    baglam_satirlari = bağlam_satirlarini_olustur(son, hisse_verisi)
+
+    # BAYAT REFERANS KONTROLÜ: Fibonacci hesaplaması yapılmadan önce
+    # kontrol ediyoruz - eğer en yakın hedef (1.272) bile güncel fiyatın
+    # altında/çok yakınındaysa, fiyat bu swing'i zaten geçmiş demektir.
+    giris_fiyat = son.get('son_yukari_giris_fiyat')
+    swing_baslangic = son.get('son_yukari_swing_baslangic')
+    stop_ref = son.get('son_pivot_low_fiyat')
+
+    fib_hesaplanabilir = (
+        pd.notna(giris_fiyat) and pd.notna(swing_baslangic) and
+        pd.notna(stop_ref) and stop_ref < guncel_fiyat and
+        (giris_fiyat - swing_baslangic) > 0 and
+        any(modeller.get(f'hedef{i}') is not None for i in [1, 2, 3])
+    )
+
+    if fib_hesaplanabilir:
+        hareket_kontrol = giris_fiyat - swing_baslangic
+        hedef1_kontrol = giris_fiyat + hareket_kontrol * (1.272 - 1)
+        if hedef1_kontrol <= guncel_fiyat:
+            fib_hesaplanabilir = False
+            baglam_satirlari.append(
+                "ℹ️ Önceki BOS referansı fiyatın gerisinde kaldı (hedefler "
+                "zaten geçilmiş) - yeni bir Fibonacci hedefi için yeni bir "
+                "sinyal bekleniyor."
+            )
+
     baglam_metni = "\n".join(baglam_satirlari) if baglam_satirlari else "Belirgin ek yapısal bağlam yok"
 
     hedef_mesafe = genel_hedef - guncel_fiyat
@@ -201,16 +267,8 @@ def sorgula(sembol):
     }
 
     # ADIM 3 — FİBONACCİ KADEMELİ HEDEFLER (varsa, ek bilgi)
-    giris_fiyat = son.get('son_yukari_giris_fiyat')
-    swing_baslangic = son.get('son_yukari_swing_baslangic')
-    stop_ref = son.get('son_pivot_low_fiyat')
-
-    fib_hesaplanabilir = (
-        pd.notna(giris_fiyat) and pd.notna(swing_baslangic) and
-        pd.notna(stop_ref) and stop_ref < guncel_fiyat and
-        (giris_fiyat - swing_baslangic) > 0 and
-        any(modeller.get(f'hedef{i}') is not None for i in [1, 2, 3])
-    )
+    # (giris_fiyat, swing_baslangic, stop_ref, fib_hesaplanabilir 
+    # zaten yukarıda hesaplandı - bayat referans kontrolüyle birlikte)
 
     if fib_hesaplanabilir:
         hareket = giris_fiyat - swing_baslangic
