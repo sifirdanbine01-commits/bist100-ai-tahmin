@@ -16,6 +16,7 @@ from telegram_bildirim import telegram_mesaj_gonder
 from durum import durumu_oku
 from model_egit import modelleri_yukle
 from gunluk_ozellik_seti import OZELLIK_KOLONLARI
+from bolge_tespiti import bolgeleri_bul
 
 SORGU_GECMISI_DOSYASI = 'sorgu_gecmisi.csv'
 FIB_ORANLARI = {1: 1.272, 2: 1.618, 3: 2.0}
@@ -96,37 +97,38 @@ def bağlam_satirlarini_olustur(son, hisse_verisi=None):
     if pd.notna(son.get('duzeltme_derinlik_yuzde')):
         satirlar.append(f"ℹ️ Son düzeltme derinliği: %{son['duzeltme_derinlik_yuzde']:.1f}")
 
-    # YENİ: Somut direnç/destek seviyeleri + temas/başarısız kırılım sayısı
-    # + GERÇEK TEMAS NOKTALARI (tarih ve fiyat)
-    if pd.notna(son.get('direnc_seviye_fiyat')):
-        satirlar.append(
-            f"📍 Direnç: {son['direnc_seviye_fiyat']:.2f} TL "
-            f"({int(son.get('direnc_temas_sayisi', 0))} temas, "
-            f"{int(son.get('direnc_basarisiz_kirilim_sayisi', 0))} başarısız kırılım denemesi)"
-        )
-        if hisse_verisi is not None:
-            lh_noktalar, _ = temas_noktalarini_bul(hisse_verisi)
-            if not lh_noktalar.empty:
+    # YENİ: Çoklu Destek/Direnç BÖLGELERİ (tek çizgi değil, %1-2 tolerans
+    # ile tekrar test edilmiş, kalıcı kırılmamış ayrı bölgeler - yatay 
+    # veya eğik olabilir)
+    if hisse_verisi is not None:
+        try:
+            bolgeler = bolgeleri_bul(hisse_verisi)
+            direnc_aktif = [b for b in bolgeler['direnc_bolgeleri'] if not b['kirilmis']]
+            destek_aktif = [b for b in bolgeler['destek_bolgeleri'] if not b['kirilmis']]
+
+            for idx, b in enumerate(direnc_aktif[:2], start=1):
                 nokta_metinleri = [
-                    f"{pd.Timestamp(r['tarih']).strftime('%d.%m.%Y')}@{r['High']:.2f}"
-                    for _, r in lh_noktalar.iterrows()
+                    f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
+                    for t, f in b['noktalar']
                 ]
+                satirlar.append(
+                    f"📍 Direnç Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
+                    f"({b['temas_sayisi']} temas, kırılmamış)"
+                )
                 satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
 
-    if pd.notna(son.get('destek_seviye_fiyat')):
-        satirlar.append(
-            f"📍 Destek: {son['destek_seviye_fiyat']:.2f} TL "
-            f"({int(son.get('destek_temas_sayisi', 0))} temas, "
-            f"{int(son.get('destek_basarisiz_kirilim_sayisi', 0))} başarısız kırılım denemesi)"
-        )
-        if hisse_verisi is not None:
-            _, hl_noktalar = temas_noktalarini_bul(hisse_verisi)
-            if not hl_noktalar.empty:
+            for idx, b in enumerate(destek_aktif[:2], start=1):
                 nokta_metinleri = [
-                    f"{pd.Timestamp(r['tarih']).strftime('%d.%m.%Y')}@{r['Low']:.2f}"
-                    for _, r in hl_noktalar.iterrows()
+                    f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
+                    for t, f in b['noktalar']
                 ]
+                satirlar.append(
+                    f"📍 Destek Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
+                    f"({b['temas_sayisi']} temas, kırılmamış)"
+                )
                 satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
+        except Exception as e:
+            print(f"  ⚠️ Bölge tespiti başarısız: {e}")
 
     # YENİ: Aşırı genişleme uyarısı
     if son.get('asiri_genisleme_bayragi') == 1:
