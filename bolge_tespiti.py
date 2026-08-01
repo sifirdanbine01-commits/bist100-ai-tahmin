@@ -85,18 +85,21 @@ def _yatay_guncelle(seviyeler, yeni_fiyat, yeni_bar, tarihler, tol, max_seviye):
         })
 
 
-def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
-                   tolerans_yuzde_egik=TOLERANS_YUZDE_EGIK,
-                   tolerans_yuzde_yatay=TOLERANS_YUZDE_YATAY,
-                   max_aktif_cizgi=MAX_AKTIF_CIZGI,
-                   max_yatay_seviye=MAX_YATAY_SEVIYE,
-                   ilgi_esik_yuzde=20):
+def _bolge_simulasyonu_adimlari(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
+                                  tolerans_yuzde_egik=TOLERANS_YUZDE_EGIK,
+                                  tolerans_yuzde_yatay=TOLERANS_YUZDE_YATAY,
+                                  max_aktif_cizgi=MAX_AKTIF_CIZGI,
+                                  max_yatay_seviye=MAX_YATAY_SEVIYE):
     """
-    ilgi_esik_yuzde: Güncel fiyattan bu yüzdeden UZAK bölgeler artık
-    "ilgisiz" sayılıp sonuçtan ÇIKARILIR. "Kırılmamış" olmak, "hâlâ 
-    ilgili" olmak demek değil - fiyat bir bölgeden uzaklaşıp bir daha 
-    hiç dönmediyse (kırılmadan, sadece terk ederek), o bölge artık 
-    pratikte anlamsızdır.
+    Pine Script'ten uyarlanan bar-bar simülasyonun ORTAK çekirdeği.
+    Her bar (i) işlendikten SONRA o barın GÜNCEL aktif bölge durumunu
+    yield eder. Böylece hem 'bolgeleri_bul' (sadece son bar) hem de
+    'gunluk_bolge_ozellikleri' (HER bar - model eğitimi için) aynı
+    mantığı kullanır, kod tekrarı ve sapma riski olmaz.
+
+    ÖNEMLİ (look-ahead yok): Bir pivot, ancak pivot_sag kadar bar
+    geçtikten SONRA (bar i = pivot_bar + pivot_sag'da) işleniyor - yani
+    bar i'deki durum, gelecekten bilgi sızdırmaz.
     """
     n = len(df_g)
     highs = df_g['High'].values
@@ -217,6 +220,31 @@ def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
         yatay_direnc[:] = [lvl for lvl in yatay_direnc if closes[i] <= lvl['fiyat'] + tol_yatay]
         yatay_destek[:] = [lvl for lvl in yatay_destek if closes[i] >= lvl['fiyat'] - tol_yatay]
 
+        yield i, aktif_direnc_cizgiler, aktif_destek_cizgiler, yatay_direnc, yatay_destek
+
+
+def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
+                   tolerans_yuzde_egik=TOLERANS_YUZDE_EGIK,
+                   tolerans_yuzde_yatay=TOLERANS_YUZDE_YATAY,
+                   max_aktif_cizgi=MAX_AKTIF_CIZGI,
+                   max_yatay_seviye=MAX_YATAY_SEVIYE,
+                   ilgi_esik_yuzde=20):
+    """
+    ilgi_esik_yuzde: Güncel fiyattan bu yüzdeden UZAK bölgeler artık
+    "ilgisiz" sayılıp sonuçtan ÇIKARILIR. "Kırılmamış" olmak, "hâlâ 
+    ilgili" olmak demek değil - fiyat bir bölgeden uzaklaşıp bir daha 
+    hiç dönmediyse (kırılmadan, sadece terk ederek), o bölge artık 
+    pratikte anlamsızdır.
+    """
+    n = len(df_g)
+    closes = df_g['Close'].values
+
+    aktif_direnc_cizgiler = aktif_destek_cizgiler = yatay_direnc = yatay_destek = []
+    for i, ad, ade, yd, yde in _bolge_simulasyonu_adimlari(
+            df_g, pivot_sol, pivot_sag, tolerans_yuzde_egik, tolerans_yuzde_yatay,
+            max_aktif_cizgi, max_yatay_seviye):
+        aktif_direnc_cizgiler, aktif_destek_cizgiler, yatay_direnc, yatay_destek = ad, ade, yd, yde
+
     guncel_bar = n - 1
     guncel_fiyat = closes[-1]
 
@@ -254,3 +282,74 @@ def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
         'direnc_bolgeleri': _cizgileri_formatla(aktif_direnc_cizgiler) + _yatay_formatla(yatay_direnc),
         'destek_bolgeleri': _cizgileri_formatla(aktif_destek_cizgiler) + _yatay_formatla(yatay_destek),
     }
+
+
+def gunluk_bolge_ozellikleri(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
+                               tolerans_yuzde_egik=TOLERANS_YUZDE_EGIK,
+                               tolerans_yuzde_yatay=TOLERANS_YUZDE_YATAY,
+                               max_aktif_cizgi=MAX_AKTIF_CIZGI,
+                               max_yatay_seviye=MAX_YATAY_SEVIYE):
+    """
+    MODEL EĞİTİMİ İÇİN: bolgeleri_bul() sadece son bar için sonuç
+    verirken, bu fonksiyon HER GÜN için o günkü aktif (kırılmamış)
+    bölgelere göre 4 sayısal özellik üretir:
+
+      - bolge_direnc_mesafe_yuzde: üstteki en yakın direncin uzaklığı (%)
+      - bolge_direnc_temas: o direncin temas sayısı
+      - bolge_destek_mesafe_yuzde: alttaki en yakın desteğin uzaklığı (%)
+      - bolge_destek_temas: o desteğin temas sayısı
+
+    O gün yakında bir bölge yoksa mesafe=999 (pratikte "sonsuz uzak"),
+    temas=0 verilir (NaN yerine - dropna ile satır kaybını önlemek için).
+
+    Look-ahead YOK: _bolge_simulasyonu_adimlari zaten pivot_sag kadar
+    gecikmeli işliyor, yani bar i'deki değer sadece o ana kadar
+    BİLİNEBİLECEK bilgiyi kullanır.
+    """
+    n = len(df_g)
+    closes = df_g['Close'].values
+
+    direnc_mesafe = np.full(n, 999.0)
+    direnc_temas = np.zeros(n)
+    destek_mesafe = np.full(n, 999.0)
+    destek_temas = np.zeros(n)
+
+    for i, ad, ade, yd, yde in _bolge_simulasyonu_adimlari(
+            df_g, pivot_sol, pivot_sag, tolerans_yuzde_egik, tolerans_yuzde_yatay,
+            max_aktif_cizgi, max_yatay_seviye):
+        fiyat = closes[i]
+
+        direnc_adaylari = []
+        for c in ad:
+            seviye = _cizgi_degeri(c['baslangic_bar'], c['baslangic_fiyat'],
+                                     c['bitis_bar'], c['bitis_fiyat'], i)
+            if seviye > fiyat:
+                direnc_adaylari.append((seviye, c['temas']))
+        for lvl in yd:
+            if lvl['fiyat'] > fiyat:
+                direnc_adaylari.append((lvl['fiyat'], lvl['temas']))
+        if direnc_adaylari:
+            en_yakin_seviye, en_yakin_temas = min(direnc_adaylari, key=lambda t: t[0])
+            direnc_mesafe[i] = (en_yakin_seviye - fiyat) / fiyat * 100
+            direnc_temas[i] = en_yakin_temas
+
+        destek_adaylari = []
+        for c in ade:
+            seviye = _cizgi_degeri(c['baslangic_bar'], c['baslangic_fiyat'],
+                                     c['bitis_bar'], c['bitis_fiyat'], i)
+            if seviye < fiyat:
+                destek_adaylari.append((seviye, c['temas']))
+        for lvl in yde:
+            if lvl['fiyat'] < fiyat:
+                destek_adaylari.append((lvl['fiyat'], lvl['temas']))
+        if destek_adaylari:
+            en_yakin_seviye, en_yakin_temas = max(destek_adaylari, key=lambda t: t[0])
+            destek_mesafe[i] = (fiyat - en_yakin_seviye) / fiyat * 100
+            destek_temas[i] = en_yakin_temas
+
+    return pd.DataFrame({
+        'bolge_direnc_mesafe_yuzde': direnc_mesafe,
+        'bolge_direnc_temas': direnc_temas,
+        'bolge_destek_mesafe_yuzde': destek_mesafe,
+        'bolge_destek_temas': destek_temas,
+    }, index=df_g.index)
