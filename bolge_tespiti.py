@@ -67,7 +67,7 @@ def _segment_gecerli_mi(highs, lows, eski_bar, eski_fiyat, yeni_bar, yeni_fiyat,
 
 def _yatay_guncelle(seviyeler, yeni_fiyat, yeni_bar, tarihler, tol, max_seviye):
     eslesti = False
-    for lvl in seviyeler:
+    for lvl in reversed(seviyeler):
         if abs(yeni_fiyat - lvl['fiyat']) <= tol:
             lvl['temas'] += 1
             lvl['fiyat'] = (lvl['fiyat'] + yeni_fiyat) / 2.0
