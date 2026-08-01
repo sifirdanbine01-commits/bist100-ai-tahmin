@@ -96,15 +96,23 @@ def _direnc_destek_uygula(guncel_fiyat, genel_hedef, genel_stop, bolgeler):
         b for b in destek_aktif
         if genel_stop < b['seviye_fiyat'] < guncel_fiyat
     ]
+    stop_ayarlandi = False
     if aradaki_destekler:
         en_yakin_destek = max(aradaki_destekler, key=lambda b: b['seviye_fiyat'])
         genel_stop = en_yakin_destek['seviye_fiyat'] * 0.995
+        stop_ayarlandi = True
         uyari += (
             f"\nℹ️ Stop, aradaki destek bölgesine ({en_yakin_destek['seviye_fiyat']:.2f} TL) "
             f"göre sınırlandırıldı."
         )
+    elif not destek_aktif:
+        uyari += (
+            f"\nℹ️ Güncel fiyata yakın, kırılmamış bir destek bölgesi bulunamadı "
+            f"(stop model tahmini ATR'ye dayanıyor)."
+        )
 
-    return genel_hedef, genel_stop, uyari
+    hedef_ayarlandi = bool(aradaki_direncler)
+    return genel_hedef, genel_stop, uyari, hedef_ayarlandi, stop_ayarlandi
 
 
 def bağlam_satirlarini_olustur(son, bolgeler=None):
@@ -235,11 +243,13 @@ def sorgula(sembol):
     # AKBNK örneğinde fiyat dirençteyken bile hedef/işlem öneriliyordu).
     bolgeler = None
     direnc_uyarisi = ""
+    hedef_ayarlandi = False
+    stop_ayarlandi = False
     if hisse_verisi is not None:
         try:
             bolgeler = bolgeleri_bul(hisse_verisi)
-            genel_hedef, genel_stop, direnc_uyarisi = _direnc_destek_uygula(
-                guncel_fiyat, genel_hedef, genel_stop, bolgeler
+            genel_hedef, genel_stop, direnc_uyarisi, hedef_ayarlandi, stop_ayarlandi = (
+                _direnc_destek_uygula(guncel_fiyat, genel_hedef, genel_stop, bolgeler)
             )
         except Exception as e:
             print(f"  ⚠️ Bölge tespiti başarısız: {e}")
@@ -278,14 +288,17 @@ def sorgula(sembol):
     rr_orani = hedef_mesafe / stop_mesafe if stop_mesafe > 0 else 0
     rr_uyarisi = "\n⚠️ R/R oranı düşük (1:1.5 altı)." if rr_orani < 1.5 else ""
 
+    hedef_etiketi = "direnç bazlı" if hedef_ayarlandi else "model tahmini"
+    stop_etiketi = "destek bazlı" if stop_ayarlandi else "ATR bazlı"
+
     mesaj = (
         f"🔮 <b>{sembol.upper()} LONG Tahmin</b> ({egitim_tarihi.date()} durumu)\n\n"
         f"📊 Bağlam:\n{baglam_metni}\n\n"
         f"Başarı Olasılığı: %{genel_olasilik*100:.0f}\n"
         f"Beklenen Hareket: %{genel_getiri_yuzde:.1f}\n\n"
         f"💰 Güncel: {guncel_fiyat:.2f} TL\n"
-        f"🎯 Hedef: {genel_hedef:.2f} TL\n"
-        f"🛑 Stop: {genel_stop:.2f} TL (ATR bazlı)\n"
+        f"🎯 Hedef: {genel_hedef:.2f} TL ({hedef_etiketi})\n"
+        f"🛑 Stop: {genel_stop:.2f} TL ({stop_etiketi})\n"
         f"⚖️ R/R: 1:{rr_orani:.2f}{rr_uyarisi}{direnc_uyarisi}\n"
     )
 
