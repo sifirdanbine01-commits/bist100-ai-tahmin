@@ -89,7 +89,15 @@ def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
                    tolerans_yuzde_egik=TOLERANS_YUZDE_EGIK,
                    tolerans_yuzde_yatay=TOLERANS_YUZDE_YATAY,
                    max_aktif_cizgi=MAX_AKTIF_CIZGI,
-                   max_yatay_seviye=MAX_YATAY_SEVIYE):
+                   max_yatay_seviye=MAX_YATAY_SEVIYE,
+                   ilgi_esik_yuzde=20):
+    """
+    ilgi_esik_yuzde: Güncel fiyattan bu yüzdeden UZAK bölgeler artık
+    "ilgisiz" sayılıp sonuçtan ÇIKARILIR. "Kırılmamış" olmak, "hâlâ 
+    ilgili" olmak demek değil - fiyat bir bölgeden uzaklaşıp bir daha 
+    hiç dönmediyse (kırılmadan, sadece terk ederek), o bölge artık 
+    pratikte anlamsızdır.
+    """
     n = len(df_g)
     highs = df_g['High'].values
     lows = df_g['Low'].values
@@ -210,12 +218,19 @@ def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
         yatay_destek[:] = [lvl for lvl in yatay_destek if closes[i] >= lvl['fiyat'] - tol_yatay]
 
     guncel_bar = n - 1
+    guncel_fiyat = closes[-1]
+
+    def _ilgili_mi(seviye_fiyat):
+        fark_yuzde = abs(guncel_fiyat - seviye_fiyat) / seviye_fiyat * 100
+        return fark_yuzde <= ilgi_esik_yuzde
 
     def _cizgileri_formatla(cizgiler):
         sonuc = []
         for c in cizgiler:
             seviye = _cizgi_degeri(c['baslangic_bar'], c['baslangic_fiyat'],
                                      c['bitis_bar'], c['bitis_fiyat'], guncel_bar)
+            if not _ilgili_mi(seviye):
+                continue
             sonuc.append({
                 'tip': 'eğik', 'seviye_fiyat': seviye, 'temas_sayisi': c['temas'],
                 'noktalar': c['noktalar'], 'kirilmis': False,
@@ -226,6 +241,8 @@ def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
     def _yatay_formatla(seviyeler):
         sonuc = []
         for lvl in seviyeler:
+            if not _ilgili_mi(lvl['fiyat']):
+                continue
             sonuc.append({
                 'tip': 'yatay', 'seviye_fiyat': lvl['fiyat'], 'temas_sayisi': lvl['temas'],
                 'noktalar': lvl['noktalar'], 'kirilmis': False,
