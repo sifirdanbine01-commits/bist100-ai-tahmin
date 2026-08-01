@@ -54,26 +54,57 @@ def sorgu_logla(egitim_tarihi, sembol, detay: dict):
     birlesik.to_csv(SORGU_GECMISI_DOSYASI, index=False)
 
 
-PENCERE_GUN = 504  # trend_cizgisi.py ile aynı pencere
-
-
-def temas_noktalarini_bul(hisse_verisi, max_goster=4):
+def _direnc_destek_uygula(guncel_fiyat, genel_hedef, genel_stop, bolgeler):
     """
-    Direnç (LH) ve destek (HL) çizgisini oluşturan GERÇEK temas 
-    noktalarının tarih ve fiyatlarını döndürür - son 504 gün 
-    penceresinden, en yakın tarihten geriye doğru.
+    Hedefi aradaki en yakın DİRENCE göre kırpar; AYNI MANTIKLA stopu da
+    aradaki en yakın DESTEĞE göre kırpar.
+
+    Önceden sadece hedef kırpılıyor, stop ATR'ye sabit kalıyordu - bu da
+    R/R oranının doğru bildiği kurulumlarda bile yapay şekilde çökmesine
+    yol açıyordu (örn. 1:2.03 -> 1:0.53). Artık destek de simetrik şekilde
+    dikkate alınıyor, böylece R/R yapısal olarak daha tutarlı.
+
+    Dönüş: (yeni_hedef, yeni_stop, uyari_metni)
     """
-    son_pencere = hisse_verisi.tail(PENCERE_GUN)
+    uyari = ""
+    direnc_aktif = bolgeler.get('direnc_bolgeleri', [])
+    destek_aktif = bolgeler.get('destek_bolgeleri', [])
 
-    lh_noktalar = son_pencere[
-        (son_pencere['pivot_high'] == True) & (son_pencere['swing_tip'] == 'LH')
-    ][['tarih', 'High']].tail(max_goster)
+    for b in direnc_aktif:
+        yakinlik_yuzde = abs(guncel_fiyat - b['seviye_fiyat']) / b['seviye_fiyat'] * 100
+        if yakinlik_yuzde <= 1.5:
+            uyari += (
+                f"\n⚠️ Fiyat aktif bir direnç bölgesine ({b['seviye_fiyat']:.2f} TL, "
+                f"{b['temas_sayisi']} temas) ÇOK YAKIN - bu seviyeyi aşamazsa "
+                f"işlem riskli olabilir."
+            )
+            break
 
-    hl_noktalar = son_pencere[
-        (son_pencere['pivot_low'] == True) & (son_pencere['swing_tip'] == 'HL')
-    ][['tarih', 'Low']].tail(max_goster)
+    aradaki_direncler = [
+        b for b in direnc_aktif
+        if guncel_fiyat < b['seviye_fiyat'] < genel_hedef
+    ]
+    if aradaki_direncler:
+        en_yakin_direnc = min(aradaki_direncler, key=lambda b: b['seviye_fiyat'])
+        genel_hedef = en_yakin_direnc['seviye_fiyat'] * 0.995
+        uyari += (
+            f"\nℹ️ Hedef, aradaki direnç bölgesine ({en_yakin_direnc['seviye_fiyat']:.2f} TL) "
+            f"göre sınırlandırıldı."
+        )
 
-    return lh_noktalar, hl_noktalar
+    aradaki_destekler = [
+        b for b in destek_aktif
+        if genel_stop < b['seviye_fiyat'] < guncel_fiyat
+    ]
+    if aradaki_destekler:
+        en_yakin_destek = max(aradaki_destekler, key=lambda b: b['seviye_fiyat'])
+        genel_stop = en_yakin_destek['seviye_fiyat'] * 0.995
+        uyari += (
+            f"\nℹ️ Stop, aradaki destek bölgesine ({en_yakin_destek['seviye_fiyat']:.2f} TL) "
+            f"göre sınırlandırıldı."
+        )
+
+    return genel_hedef, genel_stop, uyari
 
 
 def bağlam_satirlarini_olustur(son, bolgeler=None):
@@ -207,29 +238,9 @@ def sorgula(sembol):
     if hisse_verisi is not None:
         try:
             bolgeler = bolgeleri_bul(hisse_verisi)
-            direnc_aktif = bolgeler['direnc_bolgeleri']
-
-            for b in direnc_aktif:
-                yakinlik_yuzde = abs(guncel_fiyat - b['seviye_fiyat']) / b['seviye_fiyat'] * 100
-                if yakinlik_yuzde <= 1.5:
-                    direnc_uyarisi = (
-                        f"\n⚠️ Fiyat aktif bir direnç bölgesine ({b['seviye_fiyat']:.2f} TL, "
-                        f"{b['temas_sayisi']} temas) ÇOK YAKIN - bu seviyeyi aşamazsa "
-                        f"işlem riskli olabilir."
-                    )
-                    break
-
-            aradaki_direncler = [
-                b for b in direnc_aktif
-                if guncel_fiyat < b['seviye_fiyat'] < genel_hedef
-            ]
-            if aradaki_direncler:
-                en_yakin_direnc = min(aradaki_direncler, key=lambda b: b['seviye_fiyat'])
-                genel_hedef = en_yakin_direnc['seviye_fiyat'] * 0.995
-                direnc_uyarisi += (
-                    f"\nℹ️ Hedef, aradaki direnç bölgesine ({en_yakin_direnc['seviye_fiyat']:.2f} TL) "
-                    f"göre sınırlandırıldı."
-                )
+            genel_hedef, genel_stop, direnc_uyarisi = _direnc_destek_uygula(
+                guncel_fiyat, genel_hedef, genel_stop, bolgeler
+            )
         except Exception as e:
             print(f"  ⚠️ Bölge tespiti başarısız: {e}")
 
