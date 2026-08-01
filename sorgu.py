@@ -76,7 +76,7 @@ def temas_noktalarini_bul(hisse_verisi, max_goster=4):
     return lh_noktalar, hl_noktalar
 
 
-def bağlam_satirlarini_olustur(son, hisse_verisi=None):
+def bağlam_satirlarini_olustur(son, bolgeler=None):
     """Genişletilmiş bağlam: yapısal sinyaller + somut seviyeler + yeni özellikler."""
     satirlar = []
 
@@ -97,47 +97,41 @@ def bağlam_satirlarini_olustur(son, hisse_verisi=None):
     if pd.notna(son.get('duzeltme_derinlik_yuzde')):
         satirlar.append(f"ℹ️ Son düzeltme derinliği: %{son['duzeltme_derinlik_yuzde']:.1f}")
 
-    # YENİ: Çoklu Destek/Direnç BÖLGELERİ (tek çizgi değil, %1-2 tolerans
-    # ile tekrar test edilmiş, kalıcı kırılmamış ayrı bölgeler - yatay 
-    # veya eğik olabilir)
-    if hisse_verisi is not None:
-        try:
-            bolgeler = bolgeleri_bul(hisse_verisi)
-            direnc_aktif = [b for b in bolgeler['direnc_bolgeleri'] if not b['kirilmis']]
-            destek_aktif = [b for b in bolgeler['destek_bolgeleri'] if not b['kirilmis']]
+    # Çoklu Destek/Direnç BÖLGELERİ (tek çizgi değil, %1-2 tolerans ile 
+    # tekrar test edilmiş, GÜNCEL FİYATA YAKIN, kalıcı kırılmamış bölgeler)
+    if bolgeler is not None:
+        direnc_aktif = bolgeler['direnc_bolgeleri']
+        destek_aktif = bolgeler['destek_bolgeleri']
 
-            for idx, b in enumerate(direnc_aktif[:2], start=1):
-                nokta_metinleri = [
-                    f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
-                    for t, f in b['noktalar']
-                ]
-                satirlar.append(
-                    f"📍 Direnç Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
-                    f"({b['temas_sayisi']} temas, kırılmamış)"
-                )
-                satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
+        for idx, b in enumerate(direnc_aktif[:2], start=1):
+            nokta_metinleri = [
+                f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
+                for t, f in b['noktalar']
+            ]
+            satirlar.append(
+                f"📍 Direnç Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
+                f"({b['temas_sayisi']} temas, kırılmamış)"
+            )
+            satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
 
-            for idx, b in enumerate(destek_aktif[:2], start=1):
-                nokta_metinleri = [
-                    f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
-                    for t, f in b['noktalar']
-                ]
-                satirlar.append(
-                    f"📍 Destek Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
-                    f"({b['temas_sayisi']} temas, kırılmamış)"
-                )
-                satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
-        except Exception as e:
-            print(f"  ⚠️ Bölge tespiti başarısız: {e}")
+        for idx, b in enumerate(destek_aktif[:2], start=1):
+            nokta_metinleri = [
+                f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
+                for t, f in b['noktalar']
+            ]
+            satirlar.append(
+                f"📍 Destek Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
+                f"({b['temas_sayisi']} temas, kırılmamış)"
+            )
+            satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
 
-    # YENİ: Aşırı genişleme uyarısı
+    # Aşırı genişleme uyarısı
     if son.get('asiri_genisleme_bayragi') == 1:
         satirlar.append(
             f"⚠️ Aşırı genişleme: son 21 günde %{son.get('son_21_gun_getiri_yuzde', 0):.1f} "
             f"hareket - bu hissenin normalinin ÇOK üstünde, düzeltme riski artmış olabilir"
         )
 
-    # YENİ: FVG bilgisi
     if son.get('yakin_bogaFVG_var') == 1:
         satirlar.append("ℹ️ Yakın zamanda doldurulmamış bir Fair Value Gap (FVG) var")
 
@@ -205,7 +199,41 @@ def sorgula(sembol):
     atr = float(son.get('atr', guncel_fiyat * 0.02))
     genel_stop = guncel_fiyat - 1 * atr
 
-    baglam_satirlari = bağlam_satirlarini_olustur(son, hisse_verisi)
+    # BÖLGELERİ HESAPLA - hem bağlamda göstermek hem de HEDEF/RİSK 
+    # kararına GERÇEKTEN dahil etmek için (önceden sadece bilgi amaçlıydı,
+    # AKBNK örneğinde fiyat dirençteyken bile hedef/işlem öneriliyordu).
+    bolgeler = None
+    direnc_uyarisi = ""
+    if hisse_verisi is not None:
+        try:
+            bolgeler = bolgeleri_bul(hisse_verisi)
+            direnc_aktif = bolgeler['direnc_bolgeleri']
+
+            for b in direnc_aktif:
+                yakinlik_yuzde = abs(guncel_fiyat - b['seviye_fiyat']) / b['seviye_fiyat'] * 100
+                if yakinlik_yuzde <= 1.5:
+                    direnc_uyarisi = (
+                        f"\n⚠️ Fiyat aktif bir direnç bölgesine ({b['seviye_fiyat']:.2f} TL, "
+                        f"{b['temas_sayisi']} temas) ÇOK YAKIN - bu seviyeyi aşamazsa "
+                        f"işlem riskli olabilir."
+                    )
+                    break
+
+            aradaki_direncler = [
+                b for b in direnc_aktif
+                if guncel_fiyat < b['seviye_fiyat'] < genel_hedef
+            ]
+            if aradaki_direncler:
+                en_yakin_direnc = min(aradaki_direncler, key=lambda b: b['seviye_fiyat'])
+                genel_hedef = en_yakin_direnc['seviye_fiyat'] * 0.995
+                direnc_uyarisi += (
+                    f"\nℹ️ Hedef, aradaki direnç bölgesine ({en_yakin_direnc['seviye_fiyat']:.2f} TL) "
+                    f"göre sınırlandırıldı."
+                )
+        except Exception as e:
+            print(f"  ⚠️ Bölge tespiti başarısız: {e}")
+
+    baglam_satirlari = bağlam_satirlarini_olustur(son, bolgeler)
 
     # BAYAT REFERANS KONTROLÜ: Fibonacci hesaplaması yapılmadan önce
     # kontrol ediyoruz - eğer en yakın hedef (1.272) bile güncel fiyatın
@@ -247,7 +275,7 @@ def sorgula(sembol):
         f"💰 Güncel: {guncel_fiyat:.2f} TL\n"
         f"🎯 Hedef: {genel_hedef:.2f} TL\n"
         f"🛑 Stop: {genel_stop:.2f} TL (ATR bazlı)\n"
-        f"⚖️ R/R: 1:{rr_orani:.2f}{rr_uyarisi}\n"
+        f"⚖️ R/R: 1:{rr_orani:.2f}{rr_uyarisi}{direnc_uyarisi}\n"
     )
 
     olumlu, olumsuz = shap_aciklama_uret(modeller['genel_siniflandirma'], X)
