@@ -17,6 +17,7 @@ from gostergeler import gostergeleri_ekle
 from trend_cizgisi import trend_cizgilerini_hesapla
 from asiri_genisleme import asiri_genisleme_ekle
 from fvg import fvg_ekle
+from bolge_tespiti import gunluk_bolge_ozellikleri
 
 TAKIP_GUN = 10
 BASARI_ESIGI = 0.03
@@ -62,6 +63,12 @@ def hisse_icin_gunluk_ozellik_seti(sembol, df, takip_gun=TAKIP_GUN, basari_esigi
     df_g = haftalik_trend_ekle(df_g)
     df_g = asiri_genisleme_ekle(df_g)
     df_g = fvg_ekle(df_g)
+
+    df_g = df_g.copy()
+    df_g_tarihli = df_g if 'tarih' in df_g.columns else df_g.assign(tarih=df_g.index)
+    bolge_ozellikleri = gunluk_bolge_ozellikleri(df_g_tarihli)
+    df_g[['bolge_direnc_mesafe_yuzde', 'bolge_direnc_temas',
+          'bolge_destek_mesafe_yuzde', 'bolge_destek_temas']] = bolge_ozellikleri
 
     n = len(df_g)
     closes = df_g['Close'].values
@@ -244,6 +251,8 @@ OZELLIK_KOLONLARI = [
     'destek_temas_sayisi', 'destek_basarisiz_kirilim_sayisi',
     'son_21_gun_getiri_yuzde', 'asiri_genisleme_zskoru', 'asiri_genisleme_bayragi',
     'yakin_bogaFVG_var',
+    'bolge_direnc_mesafe_yuzde', 'bolge_direnc_temas',
+    'bolge_destek_mesafe_yuzde', 'bolge_destek_temas',
 ]
 
 
