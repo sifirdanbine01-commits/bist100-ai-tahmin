@@ -71,6 +71,8 @@ def _direnc_destek_uygula(guncel_fiyat, genel_hedef, genel_stop, bolgeler):
     destek_aktif = bolgeler.get('destek_bolgeleri', [])
 
     for b in direnc_aktif:
+        if b['temas_sayisi'] < 2:
+            continue
         yakinlik_yuzde = abs(guncel_fiyat - b['seviye_fiyat']) / b['seviye_fiyat'] * 100
         if yakinlik_yuzde <= 1.5:
             uyari += (
@@ -82,7 +84,7 @@ def _direnc_destek_uygula(guncel_fiyat, genel_hedef, genel_stop, bolgeler):
 
     aradaki_direncler = [
         b for b in direnc_aktif
-        if guncel_fiyat < b['seviye_fiyat'] < genel_hedef
+        if guncel_fiyat < b['seviye_fiyat'] < genel_hedef and b['temas_sayisi'] >= 2
     ]
     if aradaki_direncler:
         en_yakin_direnc = min(aradaki_direncler, key=lambda b: b['seviye_fiyat'])
@@ -94,7 +96,7 @@ def _direnc_destek_uygula(guncel_fiyat, genel_hedef, genel_stop, bolgeler):
 
     aradaki_destekler = [
         b for b in destek_aktif
-        if genel_stop < b['seviye_fiyat'] < guncel_fiyat
+        if genel_stop < b['seviye_fiyat'] < guncel_fiyat and b['temas_sayisi'] >= 2
     ]
     stop_ayarlandi = False
     if aradaki_destekler:
