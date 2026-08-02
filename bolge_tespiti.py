@@ -13,9 +13,28 @@ Python'a birebir uyarlanmış hali:
 2) YATAY SEVİYELER: Birbirine yakın (tolerans içinde) pivot noktaları 
    aynı seviyede biriktirilir (kayan ortalama), temas sayısı artar.
 
-3) KIRILMA: Kapanış, çizgiyi/seviyeyi tolerans payıyla geçerse o 
-   çizgi/seviye TAMAMEN SİLİNİR. Sonuçta elde kalan liste, ZATEN 
-   SADECE KIRILMAMIŞ (hâlâ geçerli) bölgelerden oluşur.
+3) KIRILMA + ROL DEĞİŞİMİ: Kapanış bir çizgiyi/seviyeyi tolerans 
+   payıyla geçince o çizgi/seviye ANINDA silinmez; ROL_ONAY_PENCERE 
+   (5 bar) boyunca "rol değişimi adayı" olarak izlenir. Bu süre 
+   içinde fiyat eski tarafına geri dönerse SAHTE KIRILIM sayılır ve 
+   tamamen elenir. Dönmezse ROL DEĞİŞİMİ ONAYLANIR: kırılan direnç 
+   artık gerçek bir destek (ya da kırılan destek gerçek bir direnç) 
+   olarak, temas geçmişiyle birlikte, listede kalmaya devam eder 
+   ('rolu_degisti' bayrağıyla işaretlenir). Ayrıca artık aktif çizgi/
+   seviye sayısına ZORLA bir üst sınır uygulanmıyor - kırılmamış 
+   (veya rolü onaylı şekilde değişmiş) HER bölge takip edilir.
+
+4) ÖLÇEK: Eğik çizgiler LOGARİTMİK fiyat ölçeğinde hesaplanır (iki 
+   temas noktası arasında log(fiyat) uzayında doğrusal interpolasyon) 
+   - TradingView'daki log-scale grafik görünümüyle tutarlı.
+
+5) PRICE ACTION KAYNAĞI: df_g içinde market_structure.py'nin ürettiği
+   'pivot_high'/'pivot_low'/'swing_tip' kolonları varsa, eğik çizgiler
+   SADECE gerçek LH (alçalan tepe) ve HL (yükselen dip) noktalarından
+   kurulur - bolge_tespiti'nin kendi bağımsız pivot tespiti yerine,
+   BOS/CHoCH yapısal bağlamında zaten onaylanmış swing noktaları
+   kullanılır. Bu kolonlar yoksa (örn. ham OHLC ile bağımsız çağrı),
+   eski bağımsız pivot tespitine (PIVOT_SOL/PIVOT_SAG) geri dönülür.
 """
 
 import numpy as np
@@ -23,7 +42,9 @@ import pandas as pd
 
 PIVOT_SOL = 10
 PIVOT_SAG = 10
+MS_PIVOT_SAG = 3  # market_structure.py'nin varsayılan sağ pencere değeriyle aynı
 PIVOT_HAFIZA = 20
+ROL_ONAY_PENCERE = 5  # kırılmadan sonra rol değişiminin onaylanması için beklenen bar sayısı
 MAX_AKTIF_CIZGI = 4
 MAX_YATAY_SEVIYE = 5
 TOLERANS_YUZDE_EGIK = 0.3
@@ -45,9 +66,20 @@ def _pivot_tespit_et(highs, lows, sol, sag):
 
 
 def _cizgi_degeri(baslangic_bar, baslangic_fiyat, bitis_bar, bitis_fiyat, bar):
+    """
+    LOGARİTMİK fiyat ölçeğinde doğrusal interpolasyon.
+    İki temas noktası arasında LOG(fiyat) uzayında düz bir çizgi çekilir,
+    sonra gerçek fiyata çevrilir - tıpkı TradingView'da log-scale
+    grafikte görülen çizginin, doğrusal fiyat uzayında üstel bir eğri
+    olarak görünmesi gibi. Yüzdesel hareketleri fiyat seviyesinden
+    bağımsız (ölçekten bağımsız) şekilde temsil eder.
+    """
     if bitis_bar == baslangic_bar:
         return baslangic_fiyat
-    return baslangic_fiyat + (bitis_fiyat - baslangic_fiyat) * (bar - baslangic_bar) / (bitis_bar - baslangic_bar)
+    log_baslangic = np.log(baslangic_fiyat)
+    log_bitis = np.log(bitis_fiyat)
+    log_deger = log_baslangic + (log_bitis - log_baslangic) * (bar - baslangic_bar) / (bitis_bar - baslangic_bar)
+    return np.exp(log_deger)
 
 
 def _segment_gecerli_mi(highs, lows, eski_bar, eski_fiyat, yeni_bar, yeni_fiyat, direnc_mi, tol):
@@ -65,7 +97,15 @@ def _segment_gecerli_mi(highs, lows, eski_bar, eski_fiyat, yeni_bar, yeni_fiyat,
     return True
 
 
-def _yatay_guncelle(seviyeler, yeni_fiyat, yeni_bar, tarihler, tol, max_seviye):
+def _seviye_hesapla(obj, tip, bar):
+    """Bir eğik çizginin ya da yatay seviyenin, verilen bar'daki fiyat değeri."""
+    if tip == 'eğik':
+        return _cizgi_degeri(obj['baslangic_bar'], obj['baslangic_fiyat'],
+                               obj['bitis_bar'], obj['bitis_fiyat'], bar)
+    return obj['fiyat']
+
+
+def _yatay_guncelle(seviyeler, yeni_fiyat, yeni_bar, tarihler, tol, max_seviye=None):
     eslesti = False
     for lvl in reversed(seviyeler):
         if abs(yeni_fiyat - lvl['fiyat']) <= tol:
@@ -76,9 +116,6 @@ def _yatay_guncelle(seviyeler, yeni_fiyat, yeni_bar, tarihler, tol, max_seviye):
             eslesti = True
             break
     if not eslesti:
-        if len(seviyeler) >= max_seviye:
-            min_idx = min(range(len(seviyeler)), key=lambda k: seviyeler[k]['temas'])
-            seviyeler.pop(min_idx)
         seviyeler.append({
             'fiyat': yeni_fiyat, 'temas': 1, 'son_bar': yeni_bar,
             'noktalar': [(tarihler[yeni_bar], yeni_fiyat)],
@@ -107,7 +144,24 @@ def _bolge_simulasyonu_adimlari(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
     closes = df_g['Close'].values
     tarihler = df_g['tarih'].values if 'tarih' in df_g.columns else df_g.index.values
 
-    pivot_high_mask, pivot_low_mask = _pivot_tespit_et(highs, lows, pivot_sol, pivot_sag)
+    ms_kolonlari_var = all(c in df_g.columns for c in ('pivot_high', 'pivot_low', 'swing_tip'))
+
+    if ms_kolonlari_var:
+        # PRICE ACTION: market_structure.py'nin zaten onayladığı pivotlar
+        # kaynak alınır. Eğik çizgi ADAYLARI sadece gerçek LH/HL noktaları
+        # olabilir; yatay seviyeler ve "eski nokta" hafızası için ise tüm
+        # pivot noktaları (HH/LH ya da LL/HL fark etmez) kullanılır.
+        pivot_high_mask = df_g['pivot_high'].fillna(False).values.astype(bool)
+        pivot_low_mask = df_g['pivot_low'].fillna(False).values.astype(bool)
+        swing_tip_arr = df_g['swing_tip'].values
+        direnc_aday_mask = pivot_high_mask & (swing_tip_arr == 'LH')
+        destek_aday_mask = pivot_low_mask & (swing_tip_arr == 'HL')
+        gecikme = MS_PIVOT_SAG
+    else:
+        pivot_high_mask, pivot_low_mask = _pivot_tespit_et(highs, lows, pivot_sol, pivot_sag)
+        direnc_aday_mask = pivot_high_mask
+        destek_aday_mask = pivot_low_mask
+        gecikme = pivot_sag
 
     aktif_direnc_cizgiler = []
     aktif_destek_cizgiler = []
@@ -117,47 +171,47 @@ def _bolge_simulasyonu_adimlari(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
     yatay_direnc = []
     yatay_destek = []
 
+    direnc_rol_adaylari = []
+    destek_rol_adaylari = []
+
     for i in range(n):
         tol_egik = closes[i] * tolerans_yuzde_egik / 100
         tol_yatay = closes[i] * tolerans_yuzde_yatay / 100
 
-        pivot_bar = i - pivot_sag
+        pivot_bar = i - gecikme
         if pivot_bar >= 0:
             if pivot_high_mask[pivot_bar]:
                 yeni_fiyat = highs[pivot_bar]
                 yeni_bar = pivot_bar
                 uzatildi = False
 
-                for cizgi in reversed(aktif_direnc_cizgiler):
-                    if yeni_bar > cizgi['bitis_bar']:
-                        lineval = _cizgi_degeri(cizgi['baslangic_bar'], cizgi['baslangic_fiyat'],
-                                                  cizgi['bitis_bar'], cizgi['bitis_fiyat'], yeni_bar)
-                        if (abs(yeni_fiyat - lineval) <= tol_egik and
-                                _segment_gecerli_mi(highs, lows, cizgi['bitis_bar'], cizgi['bitis_fiyat'],
-                                                      yeni_bar, yeni_fiyat, True, tol_egik)):
-                            cizgi['bitis_bar'] = yeni_bar
-                            cizgi['bitis_fiyat'] = yeni_fiyat
-                            cizgi['temas'] += 1
-                            cizgi['noktalar'].append((tarihler[yeni_bar], yeni_fiyat))
-                            uzatildi = True
-                            break
+                if direnc_aday_mask[pivot_bar]:
+                    for cizgi in reversed(aktif_direnc_cizgiler):
+                        if yeni_bar > cizgi['bitis_bar']:
+                            lineval = _cizgi_degeri(cizgi['baslangic_bar'], cizgi['baslangic_fiyat'],
+                                                      cizgi['bitis_bar'], cizgi['bitis_fiyat'], yeni_bar)
+                            if (abs(yeni_fiyat - lineval) <= tol_egik and
+                                    _segment_gecerli_mi(highs, lows, cizgi['bitis_bar'], cizgi['bitis_fiyat'],
+                                                          yeni_bar, yeni_fiyat, True, tol_egik)):
+                                cizgi['bitis_bar'] = yeni_bar
+                                cizgi['bitis_fiyat'] = yeni_fiyat
+                                cizgi['temas'] += 1
+                                cizgi['noktalar'].append((tarihler[yeni_bar], yeni_fiyat))
+                                uzatildi = True
+                                break
 
-                if not uzatildi:
-                    for eski_bar, eski_fiyat in reversed(pivot_high_hafiza):
-                        if yeni_fiyat < eski_fiyat and _segment_gecerli_mi(
-                                highs, lows, eski_bar, eski_fiyat, yeni_bar, yeni_fiyat, True, tol_egik):
-                            if len(aktif_direnc_cizgiler) >= max_aktif_cizgi:
-                                min_idx = min(range(len(aktif_direnc_cizgiler)),
-                                              key=lambda k: aktif_direnc_cizgiler[k]['temas'])
-                                aktif_direnc_cizgiler.pop(min_idx)
-                            aktif_direnc_cizgiler.append({
-                                'baslangic_bar': eski_bar, 'baslangic_fiyat': eski_fiyat,
-                                'bitis_bar': yeni_bar, 'bitis_fiyat': yeni_fiyat,
-                                'temas': 2,
-                                'noktalar': [(tarihler[eski_bar], eski_fiyat), (tarihler[yeni_bar], yeni_fiyat)],
-                            })
-                            uzatildi = True
-                            break
+                    if not uzatildi:
+                        for eski_bar, eski_fiyat in reversed(pivot_high_hafiza):
+                            if yeni_fiyat < eski_fiyat and _segment_gecerli_mi(
+                                    highs, lows, eski_bar, eski_fiyat, yeni_bar, yeni_fiyat, True, tol_egik):
+                                aktif_direnc_cizgiler.append({
+                                    'baslangic_bar': eski_bar, 'baslangic_fiyat': eski_fiyat,
+                                    'bitis_bar': yeni_bar, 'bitis_fiyat': yeni_fiyat,
+                                    'temas': 2,
+                                    'noktalar': [(tarihler[eski_bar], eski_fiyat), (tarihler[yeni_bar], yeni_fiyat)],
+                                })
+                                uzatildi = True
+                                break
 
                 _yatay_guncelle(yatay_direnc, yeni_fiyat, yeni_bar, tarihler, tol_yatay, max_yatay_seviye)
 
@@ -170,36 +224,33 @@ def _bolge_simulasyonu_adimlari(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
                 yeni_bar = pivot_bar
                 uzatildi = False
 
-                for cizgi in reversed(aktif_destek_cizgiler):
-                    if yeni_bar > cizgi['bitis_bar']:
-                        lineval = _cizgi_degeri(cizgi['baslangic_bar'], cizgi['baslangic_fiyat'],
-                                                  cizgi['bitis_bar'], cizgi['bitis_fiyat'], yeni_bar)
-                        if (abs(yeni_fiyat - lineval) <= tol_egik and
-                                _segment_gecerli_mi(highs, lows, cizgi['bitis_bar'], cizgi['bitis_fiyat'],
-                                                      yeni_bar, yeni_fiyat, False, tol_egik)):
-                            cizgi['bitis_bar'] = yeni_bar
-                            cizgi['bitis_fiyat'] = yeni_fiyat
-                            cizgi['temas'] += 1
-                            cizgi['noktalar'].append((tarihler[yeni_bar], yeni_fiyat))
-                            uzatildi = True
-                            break
+                if destek_aday_mask[pivot_bar]:
+                    for cizgi in reversed(aktif_destek_cizgiler):
+                        if yeni_bar > cizgi['bitis_bar']:
+                            lineval = _cizgi_degeri(cizgi['baslangic_bar'], cizgi['baslangic_fiyat'],
+                                                      cizgi['bitis_bar'], cizgi['bitis_fiyat'], yeni_bar)
+                            if (abs(yeni_fiyat - lineval) <= tol_egik and
+                                    _segment_gecerli_mi(highs, lows, cizgi['bitis_bar'], cizgi['bitis_fiyat'],
+                                                          yeni_bar, yeni_fiyat, False, tol_egik)):
+                                cizgi['bitis_bar'] = yeni_bar
+                                cizgi['bitis_fiyat'] = yeni_fiyat
+                                cizgi['temas'] += 1
+                                cizgi['noktalar'].append((tarihler[yeni_bar], yeni_fiyat))
+                                uzatildi = True
+                                break
 
-                if not uzatildi:
-                    for eski_bar, eski_fiyat in reversed(pivot_low_hafiza):
-                        if yeni_fiyat > eski_fiyat and _segment_gecerli_mi(
-                                highs, lows, eski_bar, eski_fiyat, yeni_bar, yeni_fiyat, False, tol_egik):
-                            if len(aktif_destek_cizgiler) >= max_aktif_cizgi:
-                                min_idx = min(range(len(aktif_destek_cizgiler)),
-                                              key=lambda k: aktif_destek_cizgiler[k]['temas'])
-                                aktif_destek_cizgiler.pop(min_idx)
-                            aktif_destek_cizgiler.append({
-                                'baslangic_bar': eski_bar, 'baslangic_fiyat': eski_fiyat,
-                                'bitis_bar': yeni_bar, 'bitis_fiyat': yeni_fiyat,
-                                'temas': 2,
-                                'noktalar': [(tarihler[eski_bar], eski_fiyat), (tarihler[yeni_bar], yeni_fiyat)],
-                            })
-                            uzatildi = True
-                            break
+                    if not uzatildi:
+                        for eski_bar, eski_fiyat in reversed(pivot_low_hafiza):
+                            if yeni_fiyat > eski_fiyat and _segment_gecerli_mi(
+                                    highs, lows, eski_bar, eski_fiyat, yeni_bar, yeni_fiyat, False, tol_egik):
+                                aktif_destek_cizgiler.append({
+                                    'baslangic_bar': eski_bar, 'baslangic_fiyat': eski_fiyat,
+                                    'bitis_bar': yeni_bar, 'bitis_fiyat': yeni_fiyat,
+                                    'temas': 2,
+                                    'noktalar': [(tarihler[eski_bar], eski_fiyat), (tarihler[yeni_bar], yeni_fiyat)],
+                                })
+                                uzatildi = True
+                                break
 
                 _yatay_guncelle(yatay_destek, yeni_fiyat, yeni_bar, tarihler, tol_yatay, max_yatay_seviye)
 
@@ -207,18 +258,67 @@ def _bolge_simulasyonu_adimlari(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
                 if len(pivot_low_hafiza) > PIVOT_HAFIZA:
                     pivot_low_hafiza.pop(0)
 
-        aktif_direnc_cizgiler[:] = [
-            c for c in aktif_direnc_cizgiler
-            if closes[i] <= _cizgi_degeri(c['baslangic_bar'], c['baslangic_fiyat'],
-                                            c['bitis_bar'], c['bitis_fiyat'], i) + tol_egik
-        ]
-        aktif_destek_cizgiler[:] = [
-            c for c in aktif_destek_cizgiler
-            if closes[i] >= _cizgi_degeri(c['baslangic_bar'], c['baslangic_fiyat'],
-                                            c['bitis_bar'], c['bitis_fiyat'], i) - tol_egik
-        ]
-        yatay_direnc[:] = [lvl for lvl in yatay_direnc if closes[i] <= lvl['fiyat'] + tol_yatay]
-        yatay_destek[:] = [lvl for lvl in yatay_destek if closes[i] >= lvl['fiyat'] - tol_yatay]
+        # KIRILMA + ROL DEĞİŞİMİ TESTİ
+        # Kırılan bir bölge artık ANINDA silinmiyor; ROL_ONAY_PENCERE kadar
+        # bar boyunca "rol değişimi adayı" olarak izleniyor. Bu süre içinde
+        # fiyat tekrar eski tarafına geçerse SAHTE KIRILIM (tamamen elenir);
+        # geçmezse ROL DEĞİŞİMİ ONAYLANIR ve eski direnç artık gerçek bir
+        # destek (ya da eski destek gerçek bir direnç) olarak devam eder.
+        kalan_direnc, kirilan_direnc = [], []
+        for c in aktif_direnc_cizgiler:
+            seviye = _cizgi_degeri(c['baslangic_bar'], c['baslangic_fiyat'], c['bitis_bar'], c['bitis_fiyat'], i)
+            (kalan_direnc if closes[i] <= seviye + tol_egik else kirilan_direnc).append(c)
+        aktif_direnc_cizgiler[:] = kalan_direnc
+        for c in kirilan_direnc:
+            direnc_rol_adaylari.append({'obj': c, 'tip': 'eğik', 'kirilma_bar': i})
+
+        kalan_destek, kirilan_destek = [], []
+        for c in aktif_destek_cizgiler:
+            seviye = _cizgi_degeri(c['baslangic_bar'], c['baslangic_fiyat'], c['bitis_bar'], c['bitis_fiyat'], i)
+            (kalan_destek if closes[i] >= seviye - tol_egik else kirilan_destek).append(c)
+        aktif_destek_cizgiler[:] = kalan_destek
+        for c in kirilan_destek:
+            destek_rol_adaylari.append({'obj': c, 'tip': 'eğik', 'kirilma_bar': i})
+
+        kalan_yd, kirilan_yd = [], []
+        for lvl in yatay_direnc:
+            (kalan_yd if closes[i] <= lvl['fiyat'] + tol_yatay else kirilan_yd).append(lvl)
+        yatay_direnc[:] = kalan_yd
+        for lvl in kirilan_yd:
+            direnc_rol_adaylari.append({'obj': lvl, 'tip': 'yatay', 'kirilma_bar': i})
+
+        kalan_yde, kirilan_yde = [], []
+        for lvl in yatay_destek:
+            (kalan_yde if closes[i] >= lvl['fiyat'] - tol_yatay else kirilan_yde).append(lvl)
+        yatay_destek[:] = kalan_yde
+        for lvl in kirilan_yde:
+            destek_rol_adaylari.append({'obj': lvl, 'tip': 'yatay', 'kirilma_bar': i})
+
+        kalan_adaylar = []
+        for aday in direnc_rol_adaylari:
+            seviye = _seviye_hesapla(aday['obj'], aday['tip'], i)
+            tol = tol_egik if aday['tip'] == 'eğik' else tol_yatay
+            if closes[i] < seviye - tol:
+                continue  # sahte kırılım - aday tamamen elendi
+            if i - aday['kirilma_bar'] >= ROL_ONAY_PENCERE:
+                aday['obj']['rolu_degisti'] = True
+                (aktif_destek_cizgiler if aday['tip'] == 'eğik' else yatay_destek).append(aday['obj'])
+                continue
+            kalan_adaylar.append(aday)
+        direnc_rol_adaylari[:] = kalan_adaylar
+
+        kalan_adaylar = []
+        for aday in destek_rol_adaylari:
+            seviye = _seviye_hesapla(aday['obj'], aday['tip'], i)
+            tol = tol_egik if aday['tip'] == 'eğik' else tol_yatay
+            if closes[i] > seviye + tol:
+                continue  # sahte kırılım - aday tamamen elendi
+            if i - aday['kirilma_bar'] >= ROL_ONAY_PENCERE:
+                aday['obj']['rolu_degisti'] = True
+                (aktif_direnc_cizgiler if aday['tip'] == 'eğik' else yatay_direnc).append(aday['obj'])
+                continue
+            kalan_adaylar.append(aday)
+        destek_rol_adaylari[:] = kalan_adaylar
 
         yield i, aktif_direnc_cizgiler, aktif_destek_cizgiler, yatay_direnc, yatay_destek
 
@@ -262,6 +362,7 @@ def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
             sonuc.append({
                 'tip': 'eğik', 'seviye_fiyat': seviye, 'temas_sayisi': c['temas'],
                 'noktalar': c['noktalar'], 'kirilmis': False,
+                'rolu_degisti': c.get('rolu_degisti', False),
             })
         sonuc.sort(key=lambda b: b['temas_sayisi'], reverse=True)
         return sonuc
@@ -274,6 +375,7 @@ def bolgeleri_bul(df_g, pivot_sol=PIVOT_SOL, pivot_sag=PIVOT_SAG,
             sonuc.append({
                 'tip': 'yatay', 'seviye_fiyat': lvl['fiyat'], 'temas_sayisi': lvl['temas'],
                 'noktalar': lvl['noktalar'], 'kirilmis': False,
+                'rolu_degisti': lvl.get('rolu_degisti', False),
             })
         sonuc.sort(key=lambda b: b['temas_sayisi'], reverse=True)
         return sonuc
