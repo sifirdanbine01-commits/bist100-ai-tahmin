@@ -147,9 +147,10 @@ def bağlam_satirlarini_olustur(son, bolgeler=None):
                 f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
                 for t, f in b['noktalar']
             ]
+            rol_notu = " 🔄 eski DESTEK, rolü değişti" if b.get('rolu_degisti') else ""
             satirlar.append(
                 f"📍 Direnç Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
-                f"({b['temas_sayisi']} temas, kırılmamış)"
+                f"({b['temas_sayisi']} temas, kırılmamış){rol_notu}"
             )
             satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
 
@@ -158,9 +159,10 @@ def bağlam_satirlarini_olustur(son, bolgeler=None):
                 f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
                 for t, f in b['noktalar']
             ]
+            rol_notu = " 🔄 eski DİRENÇ, rolü değişti" if b.get('rolu_degisti') else ""
             satirlar.append(
                 f"📍 Destek Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
-                f"({b['temas_sayisi']} temas, kırılmamış)"
+                f"({b['temas_sayisi']} temas, kırılmamış){rol_notu}"
             )
             satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
 
