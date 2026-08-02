@@ -27,7 +27,7 @@ from bolge_tespiti import bolgeleri_bul
 from sorgu import _direnc_destek_uygula
 
 ESIK_OLASILIK = float(os.environ.get("TARAMA_ESIK_OLASILIK", "0.55"))
-MAKS_GOSTER = 25  # Telegram mesaj uzunluğu taşmasın diye üst sınır
+TELEGRAM_KARAKTER_LIMITI = 3500  # Telegram sınırı 4096 - güvenlik payı bırakıldı
 
 
 def _hisseyi_degerlendir(sembol, hisse_verisi, modeller):
@@ -61,12 +61,14 @@ def _hisseyi_degerlendir(sembol, hisse_verisi, modeller):
     atr = float(son.get('atr', guncel_fiyat * 0.02))
     genel_stop = guncel_fiyat - 1 * atr
 
+    bolge_hatasi = None
     try:
         bolgeler = bolgeleri_bul(hisse_verisi)
-        genel_hedef, genel_stop, _ = _direnc_destek_uygula(
+        genel_hedef, genel_stop, _, _, _ = _direnc_destek_uygula(
             guncel_fiyat, genel_hedef, genel_stop, bolgeler
         )
     except Exception as e:
+        bolge_hatasi = str(e)
         print(f"  ⚠️ {sembol}: Bölge tespiti başarısız: {e}")
 
     hedef_mesafe = genel_hedef - guncel_fiyat
@@ -81,15 +83,16 @@ def _hisseyi_degerlendir(sembol, hisse_verisi, modeller):
         'hedef': genel_hedef,
         'stop': genel_stop,
         'rr': rr_orani,
+        'bolge_hatasi': bolge_hatasi,
     }
 
 
 def tarama_yap():
     durum = durumu_oku()
     if durum is None:
-        return "⚠️ Henüz hiç model eğitilmedi. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."
+        return ["⚠️ Henüz hiç model eğitilmedi. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."]
     if not os.path.exists('guncel_veri.csv'):
-        return "⚠️ guncel_veri.csv bulunamadı. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."
+        return ["⚠️ guncel_veri.csv bulunamadı. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."]
 
     egitim_tarihi = pd.Timestamp(durum['egitim_tarihi'])
     guncel_veri = pd.read_csv('guncel_veri.csv')
@@ -97,7 +100,7 @@ def tarama_yap():
 
     modeller = modelleri_yukle()
     sonuclar = []
-    hata_sayisi = 0
+    hatali_semboller = []
 
     for sembol, grup in guncel_veri.groupby('sembol'):
         grup = grup.sort_values('tarih')
@@ -105,12 +108,14 @@ def tarama_yap():
             sonuc = _hisseyi_degerlendir(sembol, grup, modeller)
         except Exception as e:
             print(f"  ⚠️ {sembol} değerlendirilemedi: {e}")
-            hata_sayisi += 1
+            hatali_semboller.append(sembol)
             continue
         if sonuc:
             sonuclar.append(sonuc)
 
     sonuclar.sort(key=lambda s: s['olasilik'], reverse=True)
+
+    bolge_hatali_semboller = [s['sembol'] for s in sonuclar if s.get('bolge_hatasi')]
 
     baslik = (
         f"📋 <b>Toplu Tarama Sonucu</b> ({egitim_tarihi.date()} durumu)\n"
@@ -119,27 +124,47 @@ def tarama_yap():
     )
 
     if not sonuclar:
-        mesaj = baslik + "Bu eşiği geçen LONG fırsatı bulunamadı."
+        gövde = "Bu eşiği geçen LONG fırsatı bulunamadı."
     else:
-        gosterilecek = sonuclar[:MAKS_GOSTER]
         satirlar = [
             f"• <b>{s['sembol']}</b>: %{s['olasilik']*100:.0f} olasılık | "
             f"Güncel {s['guncel_fiyat']:.2f} → Hedef {s['hedef']:.2f} "
             f"(Stop {s['stop']:.2f}) | R/R 1:{s['rr']:.2f}"
-            for s in gosterilecek
+            + (" ⚠️ bölge tespiti hatalı, kırpma uygulanmadı" if s.get('bolge_hatasi') else "")
+            for s in sonuclar
         ]
-        mesaj = baslik + "\n".join(satirlar)
-        if len(sonuclar) > MAKS_GOSTER:
-            mesaj += f"\n\n... ve {len(sonuclar) - MAKS_GOSTER} hisse daha (eşiği geçen toplam {len(sonuclar)})"
+        gövde = "\n".join(satirlar)
 
-    if hata_sayisi:
-        mesaj += f"\n\n⚠️ {hata_sayisi} hisse değerlendirilirken hata oluştu (log'lara bak)."
+    alt_notlar = f"\n\n(Eşiği geçen toplam: {len(sonuclar)} hisse)"
+    if hatali_semboller:
+        alt_notlar += f"\n⚠️ Değerlendirilemeyen hisseler: {', '.join(hatali_semboller)}"
+    if bolge_hatali_semboller:
+        alt_notlar += f"\n⚠️ Bölge tespiti hatalı hisseler: {', '.join(bolge_hatali_semboller)}"
+    alt_notlar += "\n\n⚠️ Bu geçmişe dönük bir simülasyondur, yatırım tavsiyesi değildir."
 
-    mesaj += "\n\n⚠️ Bu geçmişe dönük bir simülasyondur, yatırım tavsiyesi değildir."
-    return mesaj
+    tam_mesaj = baslik + gövde + alt_notlar
+
+    # TELEGRAM'IN 4096 KARAKTER SINIRI İÇİN: mesaj çok uzunsa satır satır
+    # birden fazla mesaja böl (veri kaybı OLMASIN diye - önceden ilk 25
+    # ile sınırlıydı, artık HİÇBİR sonuç kesilmiyor).
+    if len(tam_mesaj) <= TELEGRAM_KARAKTER_LIMITI:
+        return [tam_mesaj]
+
+    parcalar = []
+    mevcut = baslik
+    for satir in gövde.split("\n"):
+        if len(mevcut) + len(satir) + 1 > TELEGRAM_KARAKTER_LIMITI:
+            parcalar.append(mevcut)
+            mevcut = ""
+        mevcut += satir + "\n"
+    mevcut += alt_notlar
+    parcalar.append(mevcut)
+    return parcalar
 
 
 if __name__ == "__main__":
-    mesaj = tarama_yap()
-    print(mesaj)
-    telegram_mesaj_gonder(mesaj)
+    mesajlar = tarama_yap()
+    for parca in mesajlar:
+        print(parca)
+        print("---")
+        telegram_mesaj_gonder(parca)
