@@ -54,67 +54,26 @@ def sorgu_logla(egitim_tarihi, sembol, detay: dict):
     birlesik.to_csv(SORGU_GECMISI_DOSYASI, index=False)
 
 
-def _direnc_destek_uygula(guncel_fiyat, genel_hedef, genel_stop, bolgeler):
+PENCERE_GUN = 504  # trend_cizgisi.py ile aynı pencere
+
+
+def temas_noktalarini_bul(hisse_verisi, max_goster=4):
     """
-    Hedefi aradaki en yakın DİRENCE göre kırpar; AYNI MANTIKLA stopu da
-    aradaki en yakın DESTEĞE göre kırpar.
-
-    Önceden sadece hedef kırpılıyor, stop ATR'ye sabit kalıyordu - bu da
-    R/R oranının doğru bildiği kurulumlarda bile yapay şekilde çökmesine
-    yol açıyordu (örn. 1:2.03 -> 1:0.53). Artık destek de simetrik şekilde
-    dikkate alınıyor, böylece R/R yapısal olarak daha tutarlı.
-
-    Dönüş: (yeni_hedef, yeni_stop, uyari_metni)
+    Direnç (LH) ve destek (HL) çizgisini oluşturan GERÇEK temas 
+    noktalarının tarih ve fiyatlarını döndürür - son 504 gün 
+    penceresinden, en yakın tarihten geriye doğru.
     """
-    uyari = ""
-    direnc_aktif = bolgeler.get('direnc_bolgeleri', [])
-    destek_aktif = bolgeler.get('destek_bolgeleri', [])
+    son_pencere = hisse_verisi.tail(PENCERE_GUN)
 
-    for b in direnc_aktif:
-        if b['temas_sayisi'] < 2:
-            continue
-        yakinlik_yuzde = abs(guncel_fiyat - b['seviye_fiyat']) / b['seviye_fiyat'] * 100
-        if yakinlik_yuzde <= 1.5:
-            uyari += (
-                f"\n⚠️ Fiyat aktif bir direnç bölgesine ({b['seviye_fiyat']:.2f} TL, "
-                f"{b['temas_sayisi']} temas) ÇOK YAKIN - bu seviyeyi aşamazsa "
-                f"işlem riskli olabilir."
-            )
-            break
+    lh_noktalar = son_pencere[
+        (son_pencere['pivot_high'] == True) & (son_pencere['swing_tip'] == 'LH')
+    ][['tarih', 'High']].tail(max_goster)
 
-    aradaki_direncler = [
-        b for b in direnc_aktif
-        if guncel_fiyat < b['seviye_fiyat'] < genel_hedef and b['temas_sayisi'] >= 2
-    ]
-    if aradaki_direncler:
-        en_yakin_direnc = min(aradaki_direncler, key=lambda b: b['seviye_fiyat'])
-        genel_hedef = en_yakin_direnc['seviye_fiyat'] * 0.995
-        uyari += (
-            f"\nℹ️ Hedef, aradaki direnç bölgesine ({en_yakin_direnc['seviye_fiyat']:.2f} TL) "
-            f"göre sınırlandırıldı."
-        )
+    hl_noktalar = son_pencere[
+        (son_pencere['pivot_low'] == True) & (son_pencere['swing_tip'] == 'HL')
+    ][['tarih', 'Low']].tail(max_goster)
 
-    aradaki_destekler = [
-        b for b in destek_aktif
-        if genel_stop < b['seviye_fiyat'] < guncel_fiyat and b['temas_sayisi'] >= 2
-    ]
-    stop_ayarlandi = False
-    if aradaki_destekler:
-        en_yakin_destek = max(aradaki_destekler, key=lambda b: b['seviye_fiyat'])
-        genel_stop = en_yakin_destek['seviye_fiyat'] * 0.995
-        stop_ayarlandi = True
-        uyari += (
-            f"\nℹ️ Stop, aradaki destek bölgesine ({en_yakin_destek['seviye_fiyat']:.2f} TL) "
-            f"göre sınırlandırıldı."
-        )
-    elif not destek_aktif:
-        uyari += (
-            f"\nℹ️ Güncel fiyata yakın, kırılmamış bir destek bölgesi bulunamadı "
-            f"(stop model tahmini ATR'ye dayanıyor)."
-        )
-
-    hedef_ayarlandi = bool(aradaki_direncler)
-    return genel_hedef, genel_stop, uyari, hedef_ayarlandi, stop_ayarlandi
+    return lh_noktalar, hl_noktalar
 
 
 def bağlam_satirlarini_olustur(son, bolgeler=None):
@@ -138,8 +97,6 @@ def bağlam_satirlarini_olustur(son, bolgeler=None):
     if pd.notna(son.get('duzeltme_derinlik_yuzde')):
         satirlar.append(f"ℹ️ Son düzeltme derinliği: %{son['duzeltme_derinlik_yuzde']:.1f}")
 
-    # Çoklu Destek/Direnç BÖLGELERİ (tek çizgi değil, %1-2 tolerans ile 
-    # tekrar test edilmiş, GÜNCEL FİYATA YAKIN, kalıcı kırılmamış bölgeler)
     if bolgeler is not None:
         direnc_aktif = bolgeler['direnc_bolgeleri']
         destek_aktif = bolgeler['destek_bolgeleri']
@@ -149,10 +106,9 @@ def bağlam_satirlarini_olustur(son, bolgeler=None):
                 f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
                 for t, f in b['noktalar']
             ]
-            rol_notu = " 🔄 eski DESTEK, rolü değişti" if b.get('rolu_degisti') else ""
             satirlar.append(
                 f"📍 Direnç Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
-                f"({b['temas_sayisi']} temas, kırılmamış){rol_notu}"
+                f"({b['temas_sayisi']} temas, kırılmamış)"
             )
             satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
 
@@ -161,14 +117,12 @@ def bağlam_satirlarini_olustur(son, bolgeler=None):
                 f"{pd.Timestamp(t).strftime('%d.%m.%Y')}@{f:.2f}"
                 for t, f in b['noktalar']
             ]
-            rol_notu = " 🔄 eski DİRENÇ, rolü değişti" if b.get('rolu_degisti') else ""
             satirlar.append(
                 f"📍 Destek Bölgesi {idx} ({b['tip']}): {b['seviye_fiyat']:.2f} TL "
-                f"({b['temas_sayisi']} temas, kırılmamış){rol_notu}"
+                f"({b['temas_sayisi']} temas, kırılmamış)"
             )
             satirlar.append(f"   Temas noktaları: {', '.join(nokta_metinleri)}")
 
-    # Aşırı genişleme uyarısı
     if son.get('asiri_genisleme_bayragi') == 1:
         satirlar.append(
             f"⚠️ Aşırı genişleme: son 21 günde %{son.get('son_21_gun_getiri_yuzde', 0):.1f} "
@@ -185,11 +139,11 @@ def sorgula(sembol):
     durum = durumu_oku()
     if durum is None:
         return "⚠️ Henüz hiç model eğitilmedi. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."
-    if not os.path.exists('guncel_veri.csv'):
-        return "⚠️ guncel_veri.csv bulunamadı. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."
+    if not os.path.exists('guncel_veri.parquet'):
+        return "⚠️ guncel_veri.parquet bulunamadı. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."
 
     egitim_tarihi = pd.Timestamp(durum['egitim_tarihi'])
-    guncel_veri = pd.read_csv('guncel_veri.csv')
+    guncel_veri = pd.read_parquet('guncel_veri.parquet')
     guncel_veri['tarih'] = pd.to_datetime(guncel_veri['tarih'])
 
     hisse_verisi = guncel_veri[guncel_veri['sembol'] == sembol.upper()].sort_values('tarih')
@@ -199,7 +153,6 @@ def sorgula(sembol):
     son = hisse_verisi.iloc[-1]
     guncel_fiyat = float(son['Close'])
 
-    # ADIM 1 — VETO
     trend_yonu = son.get('trend_yonu', 0)
     if pd.notna(trend_yonu) and int(trend_yonu) == -1:
         mesaj = (
@@ -232,7 +185,6 @@ def sorgula(sembol):
     X = pd.DataFrame([son[OZELLIK_KOLONLARI].to_dict()]).astype(float)
     modeller = modelleri_yukle()
 
-    # ADIM 2 — GENEL TAHMİN (her zaman)
     if modeller.get('genel_siniflandirma') is None or modeller.get('genel_regresyon') is None:
         return f"⚠️ {sembol} için model bulunamadı, önce eğitim yapılmalı."
 
@@ -242,27 +194,39 @@ def sorgula(sembol):
     atr = float(son.get('atr', guncel_fiyat * 0.02))
     genel_stop = guncel_fiyat - 1 * atr
 
-    # BÖLGELERİ HESAPLA - hem bağlamda göstermek hem de HEDEF/RİSK 
-    # kararına GERÇEKTEN dahil etmek için (önceden sadece bilgi amaçlıydı,
-    # AKBNK örneğinde fiyat dirençteyken bile hedef/işlem öneriliyordu).
     bolgeler = None
     direnc_uyarisi = ""
-    hedef_ayarlandi = False
-    stop_ayarlandi = False
     if hisse_verisi is not None:
         try:
             bolgeler = bolgeleri_bul(hisse_verisi)
-            genel_hedef, genel_stop, direnc_uyarisi, hedef_ayarlandi, stop_ayarlandi = (
-                _direnc_destek_uygula(guncel_fiyat, genel_hedef, genel_stop, bolgeler)
-            )
+            direnc_aktif = bolgeler['direnc_bolgeleri']
+
+            for b in direnc_aktif:
+                yakinlik_yuzde = abs(guncel_fiyat - b['seviye_fiyat']) / b['seviye_fiyat'] * 100
+                if yakinlik_yuzde <= 1.5:
+                    direnc_uyarisi = (
+                        f"\n⚠️ Fiyat aktif bir direnç bölgesine ({b['seviye_fiyat']:.2f} TL, "
+                        f"{b['temas_sayisi']} temas) ÇOK YAKIN - bu seviyeyi aşamazsa "
+                        f"işlem riskli olabilir."
+                    )
+                    break
+
+            aradaki_direncler = [
+                b for b in direnc_aktif
+                if guncel_fiyat < b['seviye_fiyat'] < genel_hedef
+            ]
+            if aradaki_direncler:
+                en_yakin_direnc = min(aradaki_direncler, key=lambda b: b['seviye_fiyat'])
+                genel_hedef = en_yakin_direnc['seviye_fiyat'] * 0.995
+                direnc_uyarisi += (
+                    f"\nℹ️ Hedef, aradaki direnç bölgesine ({en_yakin_direnc['seviye_fiyat']:.2f} TL) "
+                    f"göre sınırlandırıldı."
+                )
         except Exception as e:
             print(f"  ⚠️ Bölge tespiti başarısız: {e}")
 
     baglam_satirlari = bağlam_satirlarini_olustur(son, bolgeler)
 
-    # BAYAT REFERANS KONTROLÜ: Fibonacci hesaplaması yapılmadan önce
-    # kontrol ediyoruz - eğer en yakın hedef (1.272) bile güncel fiyatın
-    # altında/çok yakınındaysa, fiyat bu swing'i zaten geçmiş demektir.
     giris_fiyat = son.get('son_yukari_giris_fiyat')
     swing_baslangic = son.get('son_yukari_swing_baslangic')
     stop_ref = son.get('son_pivot_low_fiyat')
@@ -292,17 +256,14 @@ def sorgula(sembol):
     rr_orani = hedef_mesafe / stop_mesafe if stop_mesafe > 0 else 0
     rr_uyarisi = "\n⚠️ R/R oranı düşük (1:1.5 altı)." if rr_orani < 1.5 else ""
 
-    hedef_etiketi = "direnç bazlı" if hedef_ayarlandi else "model tahmini"
-    stop_etiketi = "destek bazlı" if stop_ayarlandi else "ATR bazlı"
-
     mesaj = (
         f"🔮 <b>{sembol.upper()} LONG Tahmin</b> ({egitim_tarihi.date()} durumu)\n\n"
         f"📊 Bağlam:\n{baglam_metni}\n\n"
         f"Başarı Olasılığı: %{genel_olasilik*100:.0f}\n"
         f"Beklenen Hareket: %{genel_getiri_yuzde:.1f}\n\n"
         f"💰 Güncel: {guncel_fiyat:.2f} TL\n"
-        f"🎯 Hedef: {genel_hedef:.2f} TL ({hedef_etiketi})\n"
-        f"🛑 Stop: {genel_stop:.2f} TL ({stop_etiketi})\n"
+        f"🎯 Hedef: {genel_hedef:.2f} TL\n"
+        f"🛑 Stop: {genel_stop:.2f} TL (ATR bazlı)\n"
         f"⚖️ R/R: 1:{rr_orani:.2f}{rr_uyarisi}{direnc_uyarisi}\n"
     )
 
@@ -323,10 +284,6 @@ def sorgula(sembol):
         'guncel_fiyat': guncel_fiyat,
         'stop_fiyat': genel_stop,
     }
-
-    # ADIM 3 — FİBONACCİ KADEMELİ HEDEFLER (varsa, ek bilgi)
-    # (giris_fiyat, swing_baslangic, stop_ref, fib_hesaplanabilir 
-    # zaten yukarıda hesaplandı - bayat referans kontrolüyle birlikte)
 
     if fib_hesaplanabilir:
         hareket = giris_fiyat - swing_baslangic
