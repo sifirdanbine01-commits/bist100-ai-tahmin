@@ -78,11 +78,11 @@ if __name__ == "__main__":
     modelleri_kaydet(modeller)
 
     kayit_kismi = tum_ozellik_df[tum_ozellik_df['tarih'] <= hedef_tarih].copy()
-    kayit_kismi = (
-        kayit_kismi.sort_values(['sembol', 'tarih'])
-        .groupby('sembol', group_keys=False)
-        .apply(lambda g: g.tail(DISK_SAKLAMA_GUN))
-    )
+    kayit_kismi = kayit_kismi.sort_values(['sembol', 'tarih']).groupby('sembol', group_keys=False).tail(DISK_SAKLAMA_GUN)
+
+    print(f"Diskte saklanan sütunlar: {kayit_kismi.columns.tolist()}")
+    assert 'sembol' in kayit_kismi.columns, "HATA: sembol sütunu kayboldu!"
+
     kayit_kismi.to_parquet('guncel_veri.parquet', index=False, compression='gzip')
     print(f"Diskte saklanan satır sayısı: {len(kayit_kismi)} (tam eğitim {len(egitim_kismi)} satırla yapıldı)")
 
