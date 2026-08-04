@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - run: pip install pandas numpy pandas-ta-classic lightgbm scikit-learn yfinance requests joblib
+      - run: pip install pandas numpy pandas-ta-classic lightgbm scikit-learn yfinance requests joblib pyarrow
 
       - name: Otomatik guncelleme dene
         env:
@@ -32,7 +32,8 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-          git add durum.json guncel_veri.csv model_siniflandirma.pkl model_regresyon.pkl
+          git add durum.json guncel_veri.parquet model_siniflandirma.pkl model_regresyon.pkl
+          git add model_hedef1.pkl model_hedef2.pkl model_hedef3.pkl 2>/dev/null || true
           git add sorgu_gecmisi.csv 2>/dev/null || true
           git commit -m "Otomatik gunluk guncelleme" || echo "Degisiklik yok"
           git push || echo "Push edilecek bir sey yok"
