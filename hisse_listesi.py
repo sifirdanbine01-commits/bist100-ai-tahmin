@@ -1,7 +1,7 @@
 """
 /hisseler KOMUTU
 ==================
-guncel_veri.csv içinde GERÇEKTEN var olan hisseleri listeler,
+guncel_veri.parquet içinde GERÇEKTEN var olan hisseleri listeler,
 ayrıca BIST100_HISSELERI listesinde olup da veride OLMAYANLARI
 (çekilememiş olanları) ayrıca gösterir.
 """
@@ -14,10 +14,10 @@ from telegram_bildirim import telegram_mesaj_gonder
 
 
 def hisse_listesi_raporu():
-    if not os.path.exists('guncel_veri.csv'):
-        return "⚠️ guncel_veri.csv bulunamadı. Önce 'Egit veya Ilerlet' çalıştırılmalı."
+    if not os.path.exists('guncel_veri.parquet'):
+        return "⚠️ guncel_veri.parquet bulunamadı. Önce 'Egit veya Ilerlet' çalıştırılmalı."
 
-    guncel_veri = pd.read_csv('guncel_veri.csv')
+    guncel_veri = pd.read_parquet('guncel_veri.parquet')
     mevcut_hisseler = sorted(guncel_veri['sembol'].unique().tolist())
     beklenen_hisseler = sorted(BIST100_HISSELERI)
 
