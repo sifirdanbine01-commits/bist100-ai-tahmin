@@ -1,7 +1,7 @@
 """
 GÜNCELLE.PY — Sistemin Kalbi
 =============================
-İKİ MODDA ÇALIŞIR: Manuel (HEDEF_TARIH verilir) veya Otomatik 
+İKİ MODDA ÇALIŞIR: Manuel (HEDEF_TARIH verilir) veya Otomatik
 (boşsa, guard mekanizmasıyla - sadece bugüne yakınsa çalışır).
 """
 
@@ -18,6 +18,7 @@ from telegram_bildirim import telegram_mesaj_gonder
 from sonuc_ac import onceki_sorgulari_degerlendir
 
 OTOMATIK_ESIK_GUN = 10
+DISK_SAKLAMA_GUN = 800  # sorgu.py'nin ihtiyaç duyduğu pencereden (504) biraz fazla
 
 
 def hedef_tarihi_belirle(tum_veri_son_tarih):
@@ -76,7 +77,15 @@ if __name__ == "__main__":
     modeller = modelleri_egit(egitim_kismi, hedef_tarih)
     modelleri_kaydet(modeller)
 
-    tum_ozellik_df[tum_ozellik_df['tarih'] <= hedef_tarih].to_csv('guncel_veri.csv', index=False)
+    kayit_kismi = tum_ozellik_df[tum_ozellik_df['tarih'] <= hedef_tarih].copy()
+    kayit_kismi = (
+        kayit_kismi.sort_values(['sembol', 'tarih'])
+        .groupby('sembol', group_keys=False)
+        .apply(lambda g: g.tail(DISK_SAKLAMA_GUN))
+    )
+    kayit_kismi.to_parquet('guncel_veri.parquet', index=False, compression='gzip')
+    print(f"Diskte saklanan satır sayısı: {len(kayit_kismi)} (tam eğitim {len(egitim_kismi)} satırla yapıldı)")
+
     yeni_durum = durumu_kaydet(hedef_tarih.date(), len(egitim_kismi))
 
     mesaj = (
