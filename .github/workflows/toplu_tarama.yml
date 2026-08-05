@@ -1,0 +1,28 @@
+name: Toplu Tarama
+
+on:
+  schedule:
+    - cron: '45 15 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      esik:
+        description: 'Skor eşiği (örn. 0.55)'
+        required: false
+        default: '0.55'
+
+jobs:
+  tara:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy lightgbm scikit-learn joblib requests pyarrow
+      - name: Toplu tarama calistir
+        env:
+          TARAMA_ESIK: ${{ github.event.inputs.esik || '0.55' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python toplu_tarama.py
