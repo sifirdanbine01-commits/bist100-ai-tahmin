@@ -1,0 +1,43 @@
+name: Toplu Sorgu (Detayli)
+
+on:
+  schedule:
+    - cron: '0 16 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      esik:
+        description: 'Skor eşiği (örn. 0.55)'
+        required: false
+        default: '0.55'
+      max_hisse:
+        description: 'Maksimum kaç hisse detaylı gönderilsin'
+        required: false
+        default: '15'
+
+permissions:
+  contents: write
+
+jobs:
+  toplu_sorgu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy pandas-ta-classic lightgbm scikit-learn yfinance requests joblib pyarrow shap
+      - name: Toplu sorgu calistir
+        env:
+          TARAMA_ESIK: ${{ github.event.inputs.esik || '0.55' }}
+          MAX_HISSE: ${{ github.event.inputs.max_hisse || '15' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python toplu_sorgu.py
+      - name: Sorgu ve pozisyon gecmisini kaydet
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add sorgu_gecmisi.csv acik_pozisyonlar.json pozisyon_gecmisi.csv 2>/dev/null || true
+          git commit -m "Toplu sorgu ve pozisyon guncellendi" || echo "Degisiklik yok"
+          git push || echo "Push edilecek bir sey yok"
