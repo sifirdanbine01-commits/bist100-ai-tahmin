@@ -12,7 +12,7 @@ on:
       max_hisse:
         description: 'Maksimum kaç hisse detaylı gönderilsin'
         required: false
-        default: '15'
+        default: '200'
 
 permissions:
   contents: write
