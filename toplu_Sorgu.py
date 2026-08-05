@@ -18,7 +18,7 @@ from sorgu import sorgula
 from pozisyonlar import acik_semboller
 
 ESIK = float(os.environ.get("TARAMA_ESIK", "0.55"))
-MAX_HISSE = int(os.environ.get("MAX_HISSE", "15"))
+MAX_HISSE = int(os.environ.get("MAX_HISSE", "200"))
 
 
 def adaylari_bul():
