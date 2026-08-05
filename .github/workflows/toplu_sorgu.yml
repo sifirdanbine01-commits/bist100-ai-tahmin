@@ -2,7 +2,7 @@ name: Toplu Sorgu (Detayli)
 
 on:
   schedule:
-    - cron: '0 16 * * 1-5'
+    - cron: '15 6 * * 1-5'
   workflow_dispatch:
     inputs:
       esik:
@@ -30,7 +30,7 @@ jobs:
       - name: Toplu sorgu calistir
         env:
           TARAMA_ESIK: ${{ github.event.inputs.esik || '0.55' }}
-          MAX_HISSE: ${{ github.event.inputs.max_hisse || '15' }}
+          MAX_HISSE: ${{ github.event.inputs.max_hisse || '200' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python toplu_sorgu.py
