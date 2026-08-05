@@ -1,97 +1,43 @@
-"""
-TOPLU_SORGU.PY
-================
-Toplu tarama gibi eşiği geçen hisseleri bulur (açık pozisyondakileri
-ATLAYARAK), her biri için sorgu.py'deki TAM detaylı analizi çalıştırıp
-AYRI AYRI Telegram mesajı olarak gönderir.
-"""
+name: Toplu Sorgu (Detayli)
 
-import os
-import time
-import pandas as pd
+on:
+  schedule:
+    - cron: '15 6 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      esik:
+        description: 'Skor eşiği (örn. 0.55)'
+        required: false
+        default: '0.55'
+      max_hisse:
+        description: 'Maksimum kaç hisse detaylı gönderilsin'
+        required: false
+        default: '200'
 
-from durum import durumu_oku
-from model_egit import modelleri_yukle
-from gunluk_ozellik_seti import OZELLIK_KOLONLARI
-from telegram_bildirim import telegram_mesaj_gonder
-from sorgu import sorgula
-from pozisyonlar import acik_semboller
+permissions:
+  contents: write
 
-ESIK = float(os.environ.get("TARAMA_ESIK", "0.55"))
-MAX_HISSE = int(os.environ.get("MAX_HISSE", "200"))
-
-
-def adaylari_bul():
-    durum = durumu_oku()
-    if durum is None:
-        return [], "⚠️ Henüz hiç model eğitilmedi."
-    if not os.path.exists('guncel_veri.parquet'):
-        return [], "⚠️ guncel_veri.parquet bulunamadı."
-
-    guncel_veri = pd.read_parquet('guncel_veri.parquet')
-    guncel_veri['tarih'] = pd.to_datetime(guncel_veri['tarih'])
-
-    kapali_semboller = acik_semboller()
-
-    modeller = modelleri_yukle()
-    if modeller.get('genel_siniflandirma') is None:
-        return [], "⚠️ Model bulunamadı."
-
-    adaylar = []
-    for sembol, grup in guncel_veri.groupby('sembol'):
-        if sembol in kapali_semboller:
-            continue
-        try:
-            son = grup.sort_values('tarih').iloc[-1]
-
-            trend_yonu = son.get('trend_yonu', 0)
-            if pd.notna(trend_yonu) and int(trend_yonu) == -1:
-                continue
-
-            eksik = [k for k in OZELLIK_KOLONLARI if pd.isna(son.get(k))]
-            if eksik:
-                continue
-
-            X = pd.DataFrame([son[OZELLIK_KOLONLARI].to_dict()]).astype(float)
-            olasilik = float(modeller['genel_siniflandirma'].predict_proba(X)[0][1])
-
-            if olasilik >= ESIK:
-                adaylar.append((sembol, olasilik))
-        except Exception as e:
-            print(f"  ⚠️ {sembol} ön tarama hatası: {e}")
-            continue
-
-    adaylar.sort(key=lambda x: x[1], reverse=True)
-    return adaylar[:MAX_HISSE], None
-
-
-if __name__ == "__main__":
-    adaylar, hata = adaylari_bul()
-
-    if hata:
-        telegram_mesaj_gonder(hata)
-        print(hata)
-    elif not adaylar:
-        mesaj = f"📊 <b>Toplu Sorgu</b>\n\nBugün eşiği (%{ESIK*100:.0f}) geçen yeni hisse yok."
-        telegram_mesaj_gonder(mesaj)
-        print(mesaj)
-    else:
-        baslik = (
-            f"📊 <b>Toplu Sorgu Başlıyor</b>\n"
-            f"{len(adaylar)} yeni hisse için detaylı analiz gönderiliyor...\n"
-            f"(Eşik: %{ESIK*100:.0f}, açık pozisyondakiler atlandı)"
-        )
-        telegram_mesaj_gonder(baslik)
-        print(baslik)
-
-        for sembol, olasilik in adaylar:
-            try:
-                mesaj = sorgula(sembol)
-                telegram_mesaj_gonder(mesaj)
-                print(f"✅ {sembol} gönderildi (%{olasilik*100:.0f})")
-                time.sleep(1.5)
-            except Exception as e:
-                print(f"⚠️ {sembol} için sorgu başarısız: {e}")
-                continue
-
-        print(f"\nTamamlandı: {len(adaylar)} hisse için detaylı analiz gönderildi.")
+jobs:
+  toplu_sorgu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy pandas-ta-classic lightgbm scikit-learn yfinance requests joblib pyarrow shap
+      - name: Toplu sorgu calistir
+        env:
+          TARAMA_ESIK: ${{ github.event.inputs.esik || '0.55' }}
+          MAX_HISSE: ${{ github.event.inputs.max_hisse || '200' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python toplu_sorgu.py
+      - name: Sorgu ve pozisyon gecmisini kaydet
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add sorgu_gecmisi.csv acik_pozisyonlar.json pozisyon_gecmisi.csv 2>/dev/null || true
+          git commit -m "Toplu sorgu ve pozisyon guncellendi" || echo "Degisiklik yok"
+          git push || echo "Push edilecek bir sey yok"
