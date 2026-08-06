@@ -44,8 +44,8 @@ def hedef_tarihi_belirle(tum_veri_son_tarih):
               f"Otomatik güncelleme BEKLEMEDE, çıkılıyor.")
         sys.exit(0)
 
-    print(f"🤖 OTOMATİK MOD: Bugüne yakınsın, kendi kendime dünü ekleyip öğreniyorum.")
-    return min(tum_veri_son_tarih, bugun - timedelta(days=1)), False
+    print(f"🤖 OTOMATİK MOD: Bugüne yakınsın, kendi kendime bugünü ekleyip öğreniyorum.")
+    return min(tum_veri_son_tarih, bugun), False
 
 
 if __name__ == "__main__":
