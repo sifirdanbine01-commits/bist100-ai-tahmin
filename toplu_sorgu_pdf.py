@@ -25,6 +25,17 @@ GAP = 8
 CARD_W = 91
 CARD_H = 128
 
+# DejaVu Sans'ta bulunmayan renkli emojileri temizler (📍🎯🛑💰🔍📐📊🔮 vb.)
+# ✓ (U+2713), ℹ (U+2139), ⚠ (U+26A0) fontta VAR, bunlar korunuyor.
+DESTEKLENMEYEN_EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAFF\U0001F1E0-\U0001F1FF]+",
+    flags=re.UNICODE,
+)
+
+
+def emoji_temizle(metin):
+    return DESTEKLENMEYEN_EMOJI_RE.sub("", metin).strip()
+
 
 def ozet_cikar(sembol, mesaj):
     """Tam sorgu mesajından PDF kartı için özet alanları çıkarır."""
@@ -41,13 +52,16 @@ def ozet_cikar(sembol, mesaj):
 
     olasilik = bul(r"Başarı Olasılığı: %(\d+)")
     hareket = bul(r"Beklenen Hareket: %([\d.]+)")
-    guncel = bul(r"💰 Güncel: ([\d.]+) TL")
-    hedef = bul(r"🎯 Hedef: ([\d.]+) TL")
-    stop = bul(r"🛑 Stop: ([\d.]+) TL")
+    guncel = bul(r"Güncel: ([\d.]+) TL")
+    hedef = bul(r"Hedef: ([\d.]+) TL")
+    stop = bul(r"Stop: ([\d.]+) TL")
     rr = bul(r"R/R: 1:([\d.]+)")
 
-    baglam_satirlari = re.findall(r"^(✓.*|ℹ️.*)$", mesaj, flags=re.MULTILINE)
-    baglam_ozet = baglam_satirlari[:2]
+    # Tüm "Bağlam" bloğunu (direnç/destek bölgeleri dahil) tek parça al
+    baglam_match = re.search(
+        r"Bağlam:\n(.*?)\n\nBaşarı Olasılığı", mesaj, flags=re.DOTALL
+    )
+    baglam_metni = emoji_temizle(baglam_match.group(1)) if baglam_match else ""
 
     return {
         "sembol": sembol,
@@ -58,7 +72,7 @@ def ozet_cikar(sembol, mesaj):
         "hedef": hedef,
         "stop": stop,
         "rr": rr,
-        "baglam": baglam_ozet,
+        "baglam": baglam_metni,
     }
 
 
@@ -103,12 +117,25 @@ def kart_ciz(pdf, ozet, x, y):
         f"R/R:    1:{ozet['rr']}"
     )
 
-    if ozet["baglam"]:
-        pdf.set_font("DejaVu", "", 8.5)
-        pdf.set_text_color(70, 70, 70)
-        pdf.set_xy(ic_x, pdf.get_y() + 2)
-        for satir in ozet["baglam"]:
-            pdf.multi_cell(ic_w, 4.3, satir[:95])
+    # Kalan alanı doldurmak icin butun baglami (direnc/destek dahil) yaz
+    baglam_baslangic_y = pdf.get_y() + 2
+    kalan_yukseklik = (y + CARD_H - 3) - baglam_baslangic_y
+
+    if ozet["baglam"] and kalan_yukseklik > 8:
+        pdf.set_font("DejaVu", "", 7.8)
+        pdf.set_text_color(60, 60, 60)
+        pdf.set_xy(ic_x, baglam_baslangic_y)
+
+        satir_yuksekligi = 3.6
+        maks_satir = max(1, int(kalan_yukseklik / satir_yuksekligi))
+        # Yaklasik karakter butcesi: satir basi ~62 karakter
+        maks_karakter = maks_satir * 62
+
+        metin = ozet["baglam"]
+        if len(metin) > maks_karakter:
+            metin = metin[:maks_karakter - 3].rstrip() + "..."
+
+        pdf.multi_cell(ic_w, satir_yuksekligi, metin)
         pdf.set_text_color(0, 0, 0)
 
 
