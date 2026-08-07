@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       esik:
-        description: 'Skor eşiği (örn. 0.55)'
+        description: "Skor esigi (orn. 0.55)"
         required: false
         default: '0.55'
       max_hisse:
-        description: 'Maksimum kaç hisse PDF'e eklensin'
+        description: "Maksimum kac hisse PDFe eklensin"
         required: false
         default: '200'
 
