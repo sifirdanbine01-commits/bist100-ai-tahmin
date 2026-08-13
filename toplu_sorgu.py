@@ -2,9 +2,9 @@
 TOPLU_SORGU.PY
 ================
 Toplu tarama gibi eşiği geçen hisseleri bulur (açık pozisyondakileri
-ATLAYARAK), R/R oranı en az 1:1.5 olanları filtreler, her biri için
-sorgu.py'deki TAM detaylı analizi çalıştırıp AYRI AYRI Telegram mesajı
-olarak gönderir. Yeni sinyal bulunan her hisse için pozisyon açar.
+ATLAYARAK), sorgu.py ile AYNI direnç-düzeltmeli hedefi kullanarak
+R/R oranı en az MIN_RR olanları filtreler, her biri için sorgu.py'deki
+TAM detaylı analizi çalıştırıp AYRI AYRI Telegram mesajı olarak gönderir.
 """
 
 import os
@@ -17,10 +17,29 @@ from gunluk_ozellik_seti import OZELLIK_KOLONLARI
 from telegram_bildirim import telegram_mesaj_gonder
 from sorgu import sorgula
 from pozisyonlar import acik_semboller, pozisyon_ac, pozisyonlari_kontrol_et
+from bolge_tespiti import bolgeleri_bul
 
 ESIK = float(os.environ.get("TARAMA_ESIK", "0.55"))
 MAX_HISSE = int(os.environ.get("MAX_HISSE", "200"))
 MIN_RR = float(os.environ.get("MIN_RR", "1.5"))
+
+
+def duzeltilmis_hedef_hesapla(hisse_verisi, guncel_fiyat, ham_hedef):
+    """sorgu.py'deki aynı direnç-düzeltme mantığını burada da uygular,
+    böylece filtreleme ile gerçek mesaj TUTARLI R/R kullanır."""
+    try:
+        bolgeler = bolgeleri_bul(hisse_verisi)
+        direnc_aktif = bolgeler['direnc_bolgeleri']
+        aradaki_direncler = [
+            b for b in direnc_aktif
+            if guncel_fiyat < b['seviye_fiyat'] < ham_hedef
+        ]
+        if aradaki_direncler:
+            en_yakin_direnc = min(aradaki_direncler, key=lambda b: b['seviye_fiyat'])
+            return en_yakin_direnc['seviye_fiyat'] * 0.995
+    except Exception as e:
+        print(f"  ⚠️ Bölge tespiti başarısız: {e}")
+    return ham_hedef
 
 
 def adaylari_bul(guncel_veri, modeller):
@@ -33,7 +52,8 @@ def adaylari_bul(guncel_veri, modeller):
         if sembol in kapali_semboller:
             continue
         try:
-            son = grup.sort_values('tarih').iloc[-1]
+            grup_sirali = grup.sort_values('tarih')
+            son = grup_sirali.iloc[-1]
 
             trend_yonu = son.get('trend_yonu', 0)
             if pd.notna(trend_yonu) and int(trend_yonu) == -1:
@@ -51,9 +71,11 @@ def adaylari_bul(guncel_veri, modeller):
 
             guncel_fiyat = float(son['Close'])
             getiri_yuzde = abs(float(modeller['genel_regresyon'].predict(X)[0]))
-            hedef = guncel_fiyat * (1 + getiri_yuzde / 100)
+            ham_hedef = guncel_fiyat * (1 + getiri_yuzde / 100)
             atr = float(son.get('atr', guncel_fiyat * 0.02))
             stop = guncel_fiyat - atr
+
+            hedef = duzeltilmis_hedef_hesapla(grup_sirali, guncel_fiyat, ham_hedef)
 
             hedef_mesafe = hedef - guncel_fiyat
             stop_mesafe = guncel_fiyat - stop
