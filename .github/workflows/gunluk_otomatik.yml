@@ -36,4 +36,8 @@ jobs:
           git add model_hedef1.pkl model_hedef2.pkl model_hedef3.pkl 2>/dev/null || true
           git add sorgu_gecmisi.csv 2>/dev/null || true
           git commit -m "Otomatik gunluk guncelleme" || echo "Degisiklik yok"
-          git push || echo "Push edilecek bir sey yok"
+          for i in 1 2 3 4 5; do
+            git pull --rebase --autostash origin main && git push && break
+            echo "Push basarisiz, tekrar deneniyor ($i)..."
+            sleep 5
+          done
