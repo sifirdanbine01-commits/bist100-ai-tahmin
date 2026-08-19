@@ -3,7 +3,12 @@ POZISYONLAR.PY
 ================
 Açık pozisyonları (sinyal verilip henüz sonuçlanmamış hisseleri) takip eder.
 Bir hisse için pozisyon açıkken, o hisse tekrar taranmaz/sorgulanmaz.
-Fiyat hedefe veya stop'a ulaştığında pozisyon kapanır, sonuç kaydedilir.
+
+KURAL:
+- HEDEF: gün içi en yüksek fiyat (High) hedefe değerse yeterli.
+- STOP: sadece günün KAPANIŞ fiyatı (Close) stop seviyesinin altındaysa
+  tetiklenir - gün içi bir düşüş (Low) tek başına yeterli değil, kapanışta
+  da o seviyenin altında kalması gerekiyor.
 """
 
 import os
@@ -63,8 +68,9 @@ def sonucu_gecmise_yaz(sembol, bilgi, sonuc, cikis_fiyat, cikis_tarihi, getiri_y
 
 def pozisyonlari_kontrol_et(guncel_veri):
     """
-    Açık pozisyonları güncel veriyle kontrol eder. Hedefe/stop'a ulaşanları
-    veya süresi dolanları kapatır. Kapanan hisselerin Telegram mesajlarını
+    Açık pozisyonları güncel veriyle kontrol eder. Hedefe ulaşanları
+    (gün içi High) veya kapanışta stop'un altına düşenleri (Close) ya da
+    süresi dolanları kapatır. Kapanan hisselerin Telegram mesajlarını
     (liste hâlinde) döndürür.
     """
     pozisyonlar = pozisyonlari_oku()
@@ -90,22 +96,26 @@ def pozisyonlari_kontrol_et(guncel_veri):
         kapandi = False
 
         for _, gun in sonraki_gunler.iterrows():
-            if gun['Low'] <= stop:
-                getiri = (stop / giris_fiyat - 1) * 100
-                sonucu_gecmise_yaz(sembol, bilgi, 'STOP', stop, gun['tarih'].date(), getiri)
-                kapanan_mesajlari.append(
-                    f"🔴 <b>{sembol}</b> — STOP oldu ({getiri:+.2f}%)\n"
-                    f"   Giriş: {giris_fiyat:.2f} → Çıkış: {stop:.2f}"
-                )
-                del guncellenmis_pozisyonlar[sembol]
-                kapandi = True
-                break
+            # HEDEF: gün içi en yüksek fiyat yeterli
             if gun['High'] >= hedef:
                 getiri = (hedef / giris_fiyat - 1) * 100
                 sonucu_gecmise_yaz(sembol, bilgi, 'HEDEF', hedef, gun['tarih'].date(), getiri)
                 kapanan_mesajlari.append(
                     f"🟢 <b>{sembol}</b> — HEDEFE ULAŞTI ({getiri:+.2f}%)\n"
                     f"   Giriş: {giris_fiyat:.2f} → Çıkış: {hedef:.2f}"
+                )
+                del guncellenmis_pozisyonlar[sembol]
+                kapandi = True
+                break
+
+            # STOP: sadece gün KAPANIŞI stop'un altındaysa tetiklenir
+            if gun['Close'] <= stop:
+                cikis_fiyat = float(gun['Close'])
+                getiri = (cikis_fiyat / giris_fiyat - 1) * 100
+                sonucu_gecmise_yaz(sembol, bilgi, 'STOP', cikis_fiyat, gun['tarih'].date(), getiri)
+                kapanan_mesajlari.append(
+                    f"🔴 <b>{sembol}</b> — STOP oldu, kapanış onaylı ({getiri:+.2f}%)\n"
+                    f"   Giriş: {giris_fiyat:.2f} → Çıkış: {cikis_fiyat:.2f}"
                 )
                 del guncellenmis_pozisyonlar[sembol]
                 kapandi = True
