@@ -135,7 +135,7 @@ def bağlam_satirlarini_olustur(son, bolgeler=None):
     return satirlar
 
 
-def sorgula(sembol):
+def sorgula(sembol, logla=True):
     durum = durumu_oku()
     if durum is None:
         return "⚠️ Henüz hiç model eğitilmedi. Önce 'Egit veya Ilerlet' workflow'unu çalıştır."
@@ -175,7 +175,8 @@ def sorgula(sembol):
         except Exception:
             pass
         mesaj += "\n⚠️ Bu geçmişe dönük bir simülasyondur, yatırım tavsiyesi değildir."
-        sorgu_logla(egitim_tarihi, sembol, detay={'veto': 1})
+        if logla:
+            sorgu_logla(egitim_tarihi, sembol, detay={'veto': 1})
         return mesaj
 
     eksik_kolon = [k for k in OZELLIK_KOLONLARI if pd.isna(son.get(k))]
@@ -316,7 +317,8 @@ def sorgula(sembol):
 
     mesaj += "\n\n⚠️ Bu geçmişe dönük bir simülasyondur, yatırım tavsiyesi değildir."
 
-    sorgu_logla(egitim_tarihi, sembol, detay=log_detay)
+    if logla:
+        sorgu_logla(egitim_tarihi, sembol, detay=log_detay)
     return mesaj
 
 
