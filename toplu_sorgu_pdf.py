@@ -1,12 +1,10 @@
 """
 TOPLU_SORGU_PDF.PY
 ================
-toplu_sorgu.py ile AYNI filtreleme mantığını (eşik + açık pozisyon
-atlama + R/R >= MIN_RR) kullanarak adayları bulur, tek bir PDF
-raporunda toplayıp Telegram'a dosya olarak gönderir.
-NOT: Pozisyon açmaz, sadece rapor üretir - pozisyon açma işini
-toplu_sorgu.py yapıyor. İkisini aynı gün art arda çalıştırırsan
-aynı listeyi görürsün.
+YENİDEN TARAMA YAPMAZ. Bunun yerine, toplu_sorgu.py'nin BUGÜN
+(egitim_tarihi ile aynı gün) açtığı pozisyonları acik_pozisyonlar.json
+üzerinden okuyup PDF'e döker. Böylece normal sorgunun gösterdiği
+hisselerle PDF'teki hisseler HER ZAMAN birebir aynı olur.
 """
 
 import os
@@ -18,11 +16,36 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 
 from durum import durumu_oku
-from model_egit import modelleri_yukle
 from telegram_bildirim import telegram_dosya_gonder, telegram_mesaj_gonder
-from toplu_sorgu import adaylari_bul, MIN_RR, ESIK
+from pozisyonlar import pozisyonlari_oku
 
 ciktI_DOSYA = 'toplu_sorgu_raporu.pdf'
+
+
+def bugun_acilan_pozisyonlari_bul(egitim_tarihi):
+    pozisyonlar = pozisyonlari_oku()
+    bugunkuler = []
+
+    for sembol, bilgi in pozisyonlar.items():
+        if str(bilgi['giris_tarihi']) != str(egitim_tarihi):
+            continue
+
+        giris_fiyat = bilgi['giris_fiyat']
+        hedef = bilgi['hedef']
+        stop = bilgi['stop']
+        rr = (hedef - giris_fiyat) / (giris_fiyat - stop) if giris_fiyat > stop else 0
+
+        bugunkuler.append({
+            'sembol': sembol,
+            'olasilik': bilgi.get('olasilik') or 0,
+            'fiyat': giris_fiyat,
+            'hedef': hedef,
+            'stop': stop,
+            'rr': rr,
+        })
+
+    bugunkuler.sort(key=lambda x: x['olasilik'], reverse=True)
+    return bugunkuler
 
 
 def pdf_olustur(adaylar, egitim_tarihi):
@@ -34,8 +57,7 @@ def pdf_olustur(adaylar, egitim_tarihi):
     icerik = []
 
     baslik = Paragraph(
-        f"Toplu Sorgu Raporu — {egitim_tarihi} durumu "
-        f"(Eşik: %{ESIK*100:.0f}, Min R/R: 1:{MIN_RR})",
+        f"Toplu Sorgu Raporu — {egitim_tarihi} durumu",
         stiller['Title']
     )
     icerik.append(baslik)
@@ -83,26 +105,15 @@ if __name__ == "__main__":
         telegram_mesaj_gonder("⚠️ Henüz hiç model eğitilmedi.")
         exit(0)
 
-    if not os.path.exists('guncel_veri.parquet'):
-        telegram_mesaj_gonder("⚠️ guncel_veri.parquet bulunamadı.")
-        exit(0)
-
-    guncel_veri = pd.read_parquet('guncel_veri.parquet')
-    guncel_veri['tarih'] = pd.to_datetime(guncel_veri['tarih'])
-
-    modeller = modelleri_yukle()
-    if modeller.get('genel_siniflandirma') is None or modeller.get('genel_regresyon') is None:
-        telegram_mesaj_gonder("⚠️ Model bulunamadı.")
-        exit(0)
-
-    adaylar, rr_elenen = adaylari_bul(guncel_veri, modeller)
     egitim_tarihi = pd.Timestamp(durum['egitim_tarihi']).date()
+    adaylar = bugun_acilan_pozisyonlari_bul(egitim_tarihi)
 
     if not adaylar:
         telegram_mesaj_gonder(
             f"📄 <b>Toplu Sorgu PDF</b>\n\n"
-            f"Bugün eşiği (%{ESIK*100:.0f}) ve R/R şartını (1:{MIN_RR}) "
-            f"birlikte geçen hisse yok, PDF oluşturulmadı."
+            f"{egitim_tarihi} tarihinde açılmış yeni pozisyon bulunamadı "
+            f"(bugün henüz 'Toplu Sorgu (Detayli)' çalışmamış olabilir, "
+            f"ya da bugün sinyal çıkmamış olabilir)."
         )
     else:
         dosya = pdf_olustur(adaylar, egitim_tarihi)
