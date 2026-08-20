@@ -2,13 +2,12 @@
 TOPLU_SORGU_PDF.PY
 ================
 Bugün açılmış pozisyonların sembollerini alır, her biri için sorgu.py'nin
-ürettiği metinden ÖZET bir kart çıkarır (bağlam + temel metrikler),
-2x2 ızgara düzeninde (sayfa başına 4 hisse) PDF'e döker.
-Türkçe karakterler için DejaVuSans fontu kullanılır.
+ürettiği TAM mesajı (bağlam, tüm direnç/destek bölgeleri, SHAP, Fibonacci
+hedefleri - hiçbir şey kısaltılmadan) küçük fontla 2x2 ızgara düzeninde
+(sayfa başına 4 hisse) PDF'e döker. Türkçe karakterler için DejaVuSans.
 """
 
 import os
-import re
 import pandas as pd
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -51,56 +50,42 @@ def bugun_acilan_sembolleri_bul(egitim_tarihi):
     return sorted(semboller)
 
 
-def ozet_cikar(sembol, mesaj):
-    """Tam sorgu mesajından kısa bir özet çıkarır: ilk 2 bağlam satırı +
-    temel metrikler (olasılık, hedef, stop, R/R). SHAP ve Fibonacci
-    detaylarını atlar, kompakt kalması için."""
-
-    baglam_satirlari = []
-    m = re.search(r"📊 Bağlam:\n(.*?)\n\n", mesaj, re.DOTALL)
-    if m:
-        tum_satirlar = [s.strip() for s in m.group(1).split("\n") if s.strip()]
-        baglam_satirlari = tum_satirlar[:2]
-
-    metrik_satirlari = []
-    for etiket in ["Başarı Olasılığı:", "💰 Güncel:", "🎯 Hedef:", "🛑 Stop:", "⚖️ R/R:"]:
-        m2 = re.search(re.escape(etiket) + r"([^\n]*)", mesaj)
-        if m2:
-            metrik_satirlari.append(f"{etiket}{m2.group(1).strip()}")
-
-    parcalar = [f"<b>{sembol}</b>"]
-    parcalar.extend(metrik_satirlari)
-    if baglam_satirlari:
-        parcalar.append("—")
-        parcalar.extend(baglam_satirlari)
-
-    return "<br/>".join(parcalar)
+def mesaji_pdf_formatina_cevir(mesaj):
+    """Telegram HTML formatındaki mesajı (zaten <b> içeriyor) reportlab
+    Paragraph'ın anlayacağı hâle çevirir - sadece satır sonlarını <br/>
+    yapar, mevcut <b> etiketlerine dokunmaz."""
+    metin = mesaj.replace("&", "&amp;")
+    metin = metin.replace("<b>", "@@B_OPEN@@").replace("</b>", "@@B_CLOSE@@")
+    metin = metin.replace("<", "&lt;").replace(">", "&gt;")
+    metin = metin.replace("@@B_OPEN@@", "<b>").replace("@@B_CLOSE@@", "</b>")
+    metin = metin.replace("\n", "<br/>")
+    return metin
 
 
 def pdf_olustur(semboller, egitim_tarihi):
     doc = SimpleDocTemplate(
         CIKTI_DOSYA, pagesize=A4,
-        topMargin=1 * cm, bottomMargin=1 * cm,
-        leftMargin=1 * cm, rightMargin=1 * cm,
+        topMargin=0.8 * cm, bottomMargin=0.8 * cm,
+        leftMargin=0.8 * cm, rightMargin=0.8 * cm,
     )
 
     baslik_stili = ParagraphStyle(
-        'Baslik', fontName=FONT_BOLD, fontSize=14, leading=18,
-        spaceAfter=10,
+        'Baslik', fontName=FONT_BOLD, fontSize=13, leading=16,
+        spaceAfter=8,
     )
     kart_stili = ParagraphStyle(
-        'Kart', fontName=FONT_NORMAL, fontSize=8, leading=11,
+        'Kart', fontName=FONT_NORMAL, fontSize=6.3, leading=8.2,
     )
 
     icerik = []
     icerik.append(Paragraph(f"Toplu Sorgu Raporu — {egitim_tarihi} durumu", baslik_stili))
-    icerik.append(Spacer(1, 0.3 * cm))
+    icerik.append(Spacer(1, 0.2 * cm))
 
     kartlar = []
     for sembol in semboller:
         mesaj = sorgula(sembol, logla=False)
-        ozet = ozet_cikar(sembol, mesaj)
-        kartlar.append(Paragraph(ozet, kart_stili))
+        pdf_metni = mesaji_pdf_formatina_cevir(mesaj)
+        kartlar.append(Paragraph(pdf_metni, kart_stili))
 
     # 2 sütunlu ızgara - her satırda 2 kart, her sayfada 2 satır (4 kart)
     satirlar = []
@@ -110,15 +95,15 @@ def pdf_olustur(semboller, egitim_tarihi):
         else:
             satirlar.append([kartlar[i], ""])
 
-    izgara = Table(satirlar, colWidths=[9.2 * cm, 9.2 * cm], repeatRows=0)
+    izgara = Table(satirlar, colWidths=[9.6 * cm, 9.6 * cm], repeatRows=0)
     izgara.setStyle(TableStyle([
         ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#1f4e79')),
         ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#1f4e79')),
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f7f9fc')),
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
 
