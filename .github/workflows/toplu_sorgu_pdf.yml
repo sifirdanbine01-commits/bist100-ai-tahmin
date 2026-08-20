@@ -1,34 +1,31 @@
-name: Toplu Sorgu (PDF)
+name: Toplu Sorgu PDF
 
 on:
   workflow_dispatch:
     inputs:
       esik:
-        description: "Skor esigi (orn. 0.55)"
+        description: 'Skor eşiği (örn. 0.55)'
         required: false
         default: '0.55'
-      max_hisse:
-        description: "Maksimum kac hisse PDFe eklensin"
+      min_rr:
+        description: 'Minimum R/R oranı (örn. 1.5)'
         required: false
-        default: '200'
-
-permissions:
-  contents: read
+        default: '1.5'
 
 jobs:
-  toplu_sorgu_pdf:
+  pdf_rapor:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install pandas numpy pandas-ta-classic lightgbm scikit-learn yfinance requests joblib pyarrow shap fpdf2 matplotlib
-      - name: Toplu sorgu PDF olustur ve gonder
+      - run: pip install pandas numpy pandas-ta-classic lightgbm scikit-learn yfinance requests joblib pyarrow shap reportlab
+      - name: PDF rapor olustur
         env:
           TARAMA_ESIK: ${{ github.event.inputs.esik || '0.55' }}
-          MAX_HISSE: ${{ github.event.inputs.max_hisse || '200' }}
+          MIN_RR: ${{ github.event.inputs.min_rr || '1.5' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python toplu_sorgu_pdf.py
