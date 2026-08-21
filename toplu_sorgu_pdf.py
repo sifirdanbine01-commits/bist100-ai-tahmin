@@ -1,10 +1,11 @@
 """
 TOPLU_SORGU_PDF.PY
 ================
-Bugün açılmış pozisyonların sembollerini alır, her biri için sorgu.py'nin
-ürettiği TAM mesajı (bağlam, tüm direnç/destek bölgeleri, SHAP, Fibonacci
-hedefleri - hiçbir şey kısaltılmadan) küçük fontla 2x2 ızgara düzeninde
-(sayfa başına 4 hisse) PDF'e döker. Türkçe karakterler için DejaVuSans.
+Bugün açılan pozisyonlar için analiz_bilesenleri() ile veri üretir.
+İÇERİK: bağlam (renklendirilmiş direnç=kırmızı/destek=yeşil) + başarı
+olasılığı + beklenen hareket + güncel/hedef/stop/R:R.
+SHAP (destekleyen/azaltan etkenler) ve Fibonacci bölümleri YOK.
+Sayfa başına 4 hisse (2x2 ızgara).
 """
 
 import os
@@ -20,7 +21,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from durum import durumu_oku
 from telegram_bildirim import telegram_dosya_gonder, telegram_mesaj_gonder
 from pozisyonlar import pozisyonlari_oku
-from sorgu import sorgula
+from sorgu import analiz_bilesenleri
 
 CIKTI_DOSYA = 'toplu_sorgu_raporu.pdf'
 
@@ -28,7 +29,6 @@ FONT_YOLLARI = [
     ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
      "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
 ]
-
 FONT_NORMAL = "Helvetica"
 FONT_BOLD = "Helvetica-Bold"
 
@@ -40,6 +40,14 @@ for normal_yol, bold_yol in FONT_YOLLARI:
         FONT_BOLD = "TRFont-Bold"
         break
 
+RENK_DIRENC = "#c0392b"   # kırmızı
+RENK_DESTEK = "#1e8449"   # yeşil
+RENK_NORMAL = "#222222"
+
+
+def kacisli(metin):
+    return metin.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 def bugun_acilan_sembolleri_bul(egitim_tarihi):
     pozisyonlar = pozisyonlari_oku()
@@ -50,16 +58,30 @@ def bugun_acilan_sembolleri_bul(egitim_tarihi):
     return sorted(semboller)
 
 
-def mesaji_pdf_formatina_cevir(mesaj):
-    """Telegram HTML formatındaki mesajı (zaten <b> içeriyor) reportlab
-    Paragraph'ın anlayacağı hâle çevirir - sadece satır sonlarını <br/>
-    yapar, mevcut <b> etiketlerine dokunmaz."""
-    metin = mesaj.replace("&", "&amp;")
-    metin = metin.replace("<b>", "@@B_OPEN@@").replace("</b>", "@@B_CLOSE@@")
-    metin = metin.replace("<", "&lt;").replace(">", "&gt;")
-    metin = metin.replace("@@B_OPEN@@", "<b>").replace("@@B_CLOSE@@", "</b>")
-    metin = metin.replace("\n", "<br/>")
-    return metin
+def kart_html_uret(veri):
+    parcalar = [f"<b>{kacisli(veri['sembol'])}</b> ({veri['tarih']})<br/>"]
+
+    if veri['baglam']:
+        for satir in veri['baglam']:
+            renk = {'direnc': RENK_DIRENC, 'destek': RENK_DESTEK, 'normal': RENK_NORMAL}[satir['tip']]
+            parcalar.append(f'<font color="{renk}">{kacisli(satir["metin"])}</font><br/>')
+    else:
+        parcalar.append("Belirgin ek yapısal bağlam yok<br/>")
+
+    parcalar.append("<br/>")
+    parcalar.append(f"Başarı Olasılığı: %{veri['olasilik']*100:.0f}<br/>")
+    parcalar.append(f"Beklenen Hareket: %{veri['beklenen_hareket']:.1f}<br/>")
+    parcalar.append("<br/>")
+    parcalar.append(f"Güncel: {veri['guncel_fiyat']:.2f} TL<br/>")
+    parcalar.append(f"Hedef: {veri['hedef']:.2f} TL<br/>")
+    parcalar.append(f"Stop: {veri['stop']:.2f} TL<br/>")
+    rr_renk = RENK_NORMAL if veri['rr'] >= 1.5 else RENK_DIRENC
+    parcalar.append(f'<font color="{rr_renk}">R/R: 1:{veri["rr"]:.2f}</font><br/>')
+
+    if veri.get('direnc_uyarisi'):
+        parcalar.append(f'<font color="{RENK_DIRENC}">{kacisli(veri["direnc_uyarisi"])}</font><br/>')
+
+    return "".join(parcalar)
 
 
 def pdf_olustur(semboller, egitim_tarihi):
@@ -69,25 +91,26 @@ def pdf_olustur(semboller, egitim_tarihi):
         leftMargin=0.8 * cm, rightMargin=0.8 * cm,
     )
 
-    baslik_stili = ParagraphStyle(
-        'Baslik', fontName=FONT_BOLD, fontSize=13, leading=16,
-        spaceAfter=8,
-    )
-    kart_stili = ParagraphStyle(
-        'Kart', fontName=FONT_NORMAL, fontSize=6.3, leading=8.2,
-    )
+    baslik_stili = ParagraphStyle('Baslik', fontName=FONT_BOLD, fontSize=13, leading=16, spaceAfter=8)
+    kart_stili = ParagraphStyle('Kart', fontName=FONT_NORMAL, fontSize=7.2, leading=9.6)
 
-    icerik = []
-    icerik.append(Paragraph(f"Toplu Sorgu Raporu — {egitim_tarihi} durumu", baslik_stili))
-    icerik.append(Spacer(1, 0.2 * cm))
+    icerik = [Paragraph(f"Toplu Sorgu Raporu — {egitim_tarihi} durumu", baslik_stili), Spacer(1, 0.2 * cm)]
 
     kartlar = []
     for sembol in semboller:
-        mesaj = sorgula(sembol, logla=False)
-        pdf_metni = mesaji_pdf_formatina_cevir(mesaj)
-        kartlar.append(Paragraph(pdf_metni, kart_stili))
+        veri = analiz_bilesenleri(sembol, logla=False)
+        if veri.get('hata'):
+            kartlar.append(Paragraph(f"<b>{sembol}</b><br/>{kacisli(veri['hata'])}", kart_stili))
+            continue
+        if veri['veto']:
+            kartlar.append(Paragraph(
+                f"<b>{sembol}</b> ({veri['tarih']})<br/>"
+                f'<font color="{RENK_DIRENC}">Trend AŞAĞI - LONG için riskli, sinyal verilmedi.</font>',
+                kart_stili
+            ))
+            continue
+        kartlar.append(Paragraph(kart_html_uret(veri), kart_stili))
 
-    # 2 sütunlu ızgara - her satırda 2 kart, her sayfada 2 satır (4 kart)
     satirlar = []
     for i in range(0, len(kartlar), 2):
         if i + 1 < len(kartlar):
@@ -100,15 +123,14 @@ def pdf_olustur(semboller, egitim_tarihi):
         ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#1f4e79')),
         ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#1f4e79')),
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f7f9fc')),
-        ('LEFTPADDING', (0, 0), (-1, -1), 5),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
 
     icerik.append(izgara)
-
     doc.build(icerik)
     return CIKTI_DOSYA
 
@@ -123,14 +145,8 @@ if __name__ == "__main__":
     semboller = bugun_acilan_sembolleri_bul(egitim_tarihi)
 
     if not semboller:
-        telegram_mesaj_gonder(
-            f"📄 <b>Toplu Sorgu PDF</b>\n\n"
-            f"{egitim_tarihi} tarihinde açılmış pozisyon bulunamadı."
-        )
+        telegram_mesaj_gonder(f"📄 <b>Toplu Sorgu PDF</b>\n\n{egitim_tarihi} tarihinde açılmış pozisyon bulunamadı.")
     else:
         dosya = pdf_olustur(semboller, egitim_tarihi)
-        telegram_dosya_gonder(
-            dosya,
-            caption=f"📄 Toplu Sorgu Raporu ({egitim_tarihi}) — {len(semboller)} hisse"
-        )
+        telegram_dosya_gonder(dosya, caption=f"📄 Toplu Sorgu Raporu ({egitim_tarihi}) — {len(semboller)} hisse")
         print(f"PDF oluşturuldu ve gönderildi: {dosya}")
