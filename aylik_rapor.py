@@ -1,11 +1,11 @@
 """
 AYLIK_RAPOR.PY
 ================
-pozisyon_gecmisi.csv içindeki KAPANMIŞ işlemleri (çıkış tarihine göre,
-belirtilen ay/yıl için) özetler + o ay İÇİNDE AÇILMIŞ ama henüz
-sonuçlanmamış (hâlâ açık) pozisyonları ayrı bir bölümde gösterir +
-BIST100/BIST30 endeks kıyaslaması + HER İŞLEM SABİT POZISYON_BUYUKLUGU
-TL İLE AÇILMIŞ GİBİ toplam TL kâr/zarar ve birleşik yüzde hesaplar.
+pozisyon_gecmisi.csv içindeki KAPANMIŞ işlemleri (çıkış tarihine göre
+FİLTRELENİR, ama GİRİŞ tarihine göre SIRALANIR) özetler + o ay İÇİNDE
+AÇILMIŞ ama henüz sonuçlanmamış (hâlâ açık) pozisyonları ayrı bir
+bölümde gösterir + BIST100/BIST30 endeks kıyaslaması + HER İŞLEM SABİT
+POZISYON_BUYUKLUGU TL İLE AÇILMIŞ GİBİ toplam TL kâr/zarar hesaplar.
 """
 
 import os
@@ -54,10 +54,11 @@ def kapanan_ay_verisini_getir(yil, ay):
         return pd.DataFrame()
     df = pd.read_csv(GECMIS_DOSYASI)
     df['cikis_tarihi'] = pd.to_datetime(df['cikis_tarihi'])
+    df['giris_tarihi'] = pd.to_datetime(df['giris_tarihi'])
     df_ay = df[(df['cikis_tarihi'].dt.year == yil) & (df['cikis_tarihi'].dt.month == ay)].copy()
     if not df_ay.empty:
         df_ay['tl_kar_zarar'] = POZISYON_BUYUKLUGU * df_ay['getiri_yuzde'] / 100
-    return df_ay.sort_values('cikis_tarihi')
+    return df_ay.sort_values('giris_tarihi')
 
 
 def acik_ay_verisini_getir(yil, ay):
@@ -151,7 +152,7 @@ def pdf_olustur(df_kapanan, df_acik, yil, ay, bist100_degisim, bist30_degisim):
 
     icerik.append(Spacer(1, 0.3 * cm))
 
-    # --- KAPANAN İŞLEMLER TABLOSU ---
+    # --- KAPANAN İŞLEMLER TABLOSU (giriş tarihine göre sıralı) ---
     icerik.append(Paragraph(f"Kapanan İşlemler ({toplam})", altbaslik_stili))
 
     if toplam > 0:
@@ -179,7 +180,7 @@ def pdf_olustur(df_kapanan, df_acik, yil, ay, bist100_degisim, bist30_degisim):
         for _, row in df_kapanan.iterrows():
             tablo_veri.append([
                 row['sembol'],
-                pd.Timestamp(row['giris_tarihi']).strftime('%d.%m.%Y'),
+                row['giris_tarihi'].strftime('%d.%m.%Y'),
                 f"{row['giris_fiyat']:.2f}",
                 row['cikis_tarihi'].strftime('%d.%m.%Y'),
                 f"{row['cikis_fiyat']:.2f}",
@@ -207,7 +208,7 @@ def pdf_olustur(df_kapanan, df_acik, yil, ay, bist100_degisim, bist30_degisim):
     else:
         icerik.append(Paragraph("Bu ay kapanmış işlem bulunmuyor.", ozet_stili))
 
-    # --- HÂLÂ AÇIK OLAN POZİSYONLAR ---
+    # --- HÂLÂ AÇIK OLAN POZİSYONLAR (giriş tarihine göre sıralı) ---
     icerik.append(Paragraph(f"Hâlâ Açık Olan Pozisyonlar ({len(df_acik)})", altbaslik_stili))
 
     if not df_acik.empty:
