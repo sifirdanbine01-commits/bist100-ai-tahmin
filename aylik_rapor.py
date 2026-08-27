@@ -3,15 +3,16 @@ AYLIK_RAPOR.PY
 ================
 pozisyon_gecmisi.csv içindeki KAPANMIŞ işlemleri (çıkış tarihine göre,
 belirtilen ay/yıl için) özetler + o ay İÇİNDE AÇILMIŞ ama henüz
-sonuçlanmamış (hâlâ açık) pozisyonları ayrı bir bölümde gösterir.
-Kapanan bir işlem, kapandığı ayın raporunda "kapandı" olarak görünür
-(giriş ayı farklı olsa bile) - bu, çıkış tarihine göre gruplamanın
-doğal sonucu.
+sonuçlanmamış (hâlâ açık) pozisyonları ayrı bir bölümde gösterir +
+BIST100/BIST30 endekslerinin o ay ne kadar hareket ettiğini kıyaslama
+olarak ekler.
 """
 
 import os
+import calendar
 from datetime import datetime
 import pandas as pd
+import yfinance as yf
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
@@ -57,8 +58,6 @@ def kapanan_ay_verisini_getir(yil, ay):
 
 
 def acik_ay_verisini_getir(yil, ay):
-    """O ay İÇİNDE açılmış ama henüz kapanmamış (hâlâ acik_pozisyonlar.json'da
-    olan) pozisyonları döndürür."""
     pozisyonlar = pozisyonlari_oku()
     satirlar = []
     for sembol, bilgi in pozisyonlar.items():
@@ -77,7 +76,29 @@ def acik_ay_verisini_getir(yil, ay):
     return df_acik
 
 
-def pdf_olustur(df_kapanan, df_acik, yil, ay):
+def endeks_degisimini_hesapla(sembol, yil, ay):
+    """Bir ayın ilk ve son işlem gününün kapanışına göre yüzde değişim
+    hesaplar. Veri yoksa None döner."""
+    try:
+        ay_baslangic = f"{yil}-{ay:02d}-01"
+        son_gun = calendar.monthrange(yil, ay)[1]
+        ay_bitis = f"{yil}-{ay:02d}-{son_gun:02d}"
+
+        df = yf.download(sembol, start=ay_baslangic, end=ay_bitis, interval="1d", progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty or len(df) < 2:
+            return None
+
+        ilk_kapanis = float(df['Close'].iloc[0])
+        son_kapanis = float(df['Close'].iloc[-1])
+        return (son_kapanis / ilk_kapanis - 1) * 100
+    except Exception as e:
+        print(f"  ⚠️ {sembol} endeks verisi alınamadı: {e}")
+        return None
+
+
+def pdf_olustur(df_kapanan, df_acik, yil, ay, bist100_degisim, bist30_degisim):
     doc = SimpleDocTemplate(
         CIKTI_DOSYA, pagesize=A4,
         topMargin=1.2 * cm, bottomMargin=1.2 * cm,
@@ -90,7 +111,23 @@ def pdf_olustur(df_kapanan, df_acik, yil, ay):
 
     icerik = []
     icerik.append(Paragraph(f"Aylık İşlem Raporu — {AY_ISIMLERI[ay]} {yil}", baslik_stili))
-    icerik.append(Spacer(1, 0.2 * cm))
+
+    # --- PİYASA KARŞILAŞTIRMASI ---
+    icerik.append(Paragraph("Piyasa Karşılaştırması", altbaslik_stili))
+
+    bist100_metni = f"%{bist100_degisim:+.2f}" if bist100_degisim is not None else "veri alınamadı"
+    bist30_metni = f"%{bist30_degisim:+.2f}" if bist30_degisim is not None else "veri alınamadı"
+
+    ortalama_getiri_kapanan = df_kapanan['getiri_yuzde'].mean() if len(df_kapanan) > 0 else None
+    ort_metni = f"%{ortalama_getiri_kapanan:+.2f}" if ortalama_getiri_kapanan is not None else "kapanan işlem yok"
+
+    piyasa_metni = (
+        f"<b>BIST100 (XU100) bu ay:</b> {bist100_metni}<br/>"
+        f"<b>BIST30 (XU030) bu ay:</b> {bist30_metni}<br/>"
+        f"<b>Sistemin ortalama işlem getirisi:</b> {ort_metni}"
+    )
+    icerik.append(Paragraph(piyasa_metni, ozet_stili))
+    icerik.append(Spacer(1, 0.3 * cm))
 
     # --- KAPANAN İŞLEMLER ---
     toplam = len(df_kapanan)
@@ -101,7 +138,6 @@ def pdf_olustur(df_kapanan, df_acik, yil, ay):
         stop_sayisi = int((df_kapanan['sonuc'] == 'STOP').sum())
         zaman_asimi_sayisi = int((df_kapanan['sonuc'] == 'ZAMAN_ASIMI').sum())
         basari_orani = (hedef_sayisi / toplam * 100)
-        ortalama_getiri = df_kapanan['getiri_yuzde'].mean()
         en_iyi = df_kapanan['getiri_yuzde'].max()
         en_kotu = df_kapanan['getiri_yuzde'].min()
         kazanan_oran = (df_kapanan['getiri_yuzde'] > 0).mean() * 100
@@ -112,7 +148,7 @@ def pdf_olustur(df_kapanan, df_acik, yil, ay):
             f"<b>Süre dolan:</b> {zaman_asimi_sayisi}<br/>"
             f"<b>Hedef başarı oranı:</b> %{basari_orani:.1f} &nbsp;&nbsp; "
             f"<b>Kazanan işlem oranı:</b> %{kazanan_oran:.1f}<br/>"
-            f"<b>Ortalama getiri:</b> %{ortalama_getiri:.2f} &nbsp;&nbsp; "
+            f"<b>Ortalama getiri:</b> {ort_metni} &nbsp;&nbsp; "
             f"<b>En iyi:</b> %{en_iyi:.2f} &nbsp;&nbsp; "
             f"<b>En kötü:</b> %{en_kotu:.2f}"
         )
@@ -188,9 +224,11 @@ def pdf_olustur(df_kapanan, df_acik, yil, ay):
 
     icerik.append(Spacer(1, 0.4 * cm))
     icerik.append(Paragraph(
-        "Not: 'Kapanan İşlemler' istatistikleri (başarı oranı, ortalama getiri) sadece "
-        "sonuçlanmış işlemleri kapsar. Bu geçmişe dönük bir simülasyondur, yatırım "
-        "tavsiyesi değildir.",
+        "Not: Piyasa karşılaştırması BIST100/BIST30 endekslerinin ayın ilk ve son "
+        "işlem gününün kapanış fiyatına göre basit yüzde değişimidir. 'Kapanan "
+        "İşlemler' istatistikleri sadece sonuçlanmış işlemleri kapsar, sermaye "
+        "büyüklüğü/pozisyon boyutlandırma dikkate alınmamıştır. Bu geçmişe dönük "
+        "bir simülasyondur, yatırım tavsiyesi değildir.",
         not_stili
     ))
 
@@ -208,10 +246,15 @@ if __name__ == "__main__":
     df_kapanan = kapanan_ay_verisini_getir(yil, ay)
     df_acik = acik_ay_verisini_getir(yil, ay)
 
+    print("BIST100 endeks verisi çekiliyor...")
+    bist100_degisim = endeks_degisimini_hesapla("XU100.IS", yil, ay)
+    print("BIST30 endeks verisi çekiliyor...")
+    bist30_degisim = endeks_degisimini_hesapla("XU030.IS", yil, ay)
+
     if df_kapanan.empty and df_acik.empty:
         telegram_mesaj_gonder(f"📄 {AY_ISIMLERI[ay]} {yil} için ne kapanmış ne de açık pozisyon bulundu.")
     else:
-        dosya = pdf_olustur(df_kapanan, df_acik, yil, ay)
+        dosya = pdf_olustur(df_kapanan, df_acik, yil, ay, bist100_degisim, bist30_degisim)
         telegram_dosya_gonder(
             dosya,
             caption=f"📄 Aylık İşlem Raporu — {AY_ISIMLERI[ay]} {yil} "
