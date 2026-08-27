@@ -13,6 +13,10 @@ on:
         description: 'Ay (1-12, boş bırakılırsa bu ay)'
         required: false
         default: ''
+      pozisyon_buyuklugu:
+        description: 'İşlem başına varsayılan TL (örn. 5000)'
+        required: false
+        default: '5000'
 
 jobs:
   rapor:
@@ -30,6 +34,7 @@ jobs:
         env:
           RAPOR_YIL: ${{ github.event.inputs.yil }}
           RAPOR_AY: ${{ github.event.inputs.ay }}
+          POZISYON_BUYUKLUGU: ${{ github.event.inputs.pozisyon_buyuklugu || '5000' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python aylik_rapor.py
