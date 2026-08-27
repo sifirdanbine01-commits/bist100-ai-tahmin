@@ -25,7 +25,7 @@ jobs:
           python-version: '3.11'
       - name: Turkce karakter destekli font kur
         run: sudo apt-get update -qq && sudo apt-get install -y fonts-dejavu-core
-      - run: pip install pandas reportlab requests
+      - run: pip install pandas reportlab requests yfinance
       - name: Aylik rapor olustur
         env:
           RAPOR_YIL: ${{ github.event.inputs.yil }}
